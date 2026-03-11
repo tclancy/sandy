@@ -26,7 +26,10 @@ def _find_release_radar(sp: spotipy.Spotify) -> str | None:
 
 
 def handle(text: str, actor: str) -> str:
-    sp = _get_spotify_client()
+    try:
+        sp = _get_spotify_client()
+    except Exception as e:
+        return f"Spotify auth failed: {e}"
 
     playlist_id = _find_release_radar(sp)
     if playlist_id is None:

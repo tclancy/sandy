@@ -30,6 +30,9 @@ def load_plugins(plugin_dir: str) -> list:
 
         try:
             spec = importlib.util.spec_from_file_location(module_name, filepath)
+            if spec is None or spec.loader is None:
+                print(f"Warning: could not create loader for {filename}", file=sys.stderr)
+                continue
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
         except Exception as e:

@@ -77,3 +77,9 @@ def test_handle_empty_playlist():
     with patch.object(spotify, "_get_spotify_client", return_value=mock_sp):
         result = spotify.handle("find me new music", "tom")
     assert "empty" in result.lower() or "no tracks" in result.lower()
+
+
+def test_handle_auth_failure():
+    with patch.object(spotify, "_get_spotify_client", side_effect=Exception("no credentials")):
+        result = spotify.handle("find me new music", "tom")
+    assert "auth failed" in result.lower()
