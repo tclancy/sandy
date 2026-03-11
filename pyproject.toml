@@ -1,0 +1,13 @@
+[project]
+name = "sandy"
+version = "0.1.0"
+description = "CLI tool that routes text commands to plugins"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
