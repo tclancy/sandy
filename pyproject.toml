@@ -3,7 +3,7 @@ name = "sandy"
 version = "0.1.0"
 description = "CLI tool that routes text commands to plugins"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = ["spotipy>=2.24.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
