@@ -5,12 +5,12 @@
 
 ## Overview
 
-Sandy is a CLI tool that routes freeform text commands to plugins. Inspired by [I Want Sandy](https://boingboing.net/2007/11/14/i-want-sandy-perfect.html), it aims to abstract away busywork by letting you type what you want done and having the right plugin handle it.
+Sandy is a CLI tool that routes freeform text commands to plugins. Inspired by [I Want Sandy](https://boingboing.net/2007/11/14/i-want-sandy-perfect.html), it aims to abstract away busywork and bring delight by letting you type what you want done and having the right plugin(s) handle it. Multiple plugins can respond to the same input — Sandy fans out to all matches and aggregates results.
 
 ## Architecture
 
 ```
-User -> CLI (sandy "some text") -> Plugin Loader -> Pattern Matcher -> Plugin.handle() -> stdout
+User -> CLI (sandy "some text") -> Plugin Loader -> Pattern Matcher -> all matching Plugin.handle() -> stdout
 ```
 
 No daemon, no server, no database. A single Python package installed locally via `uv pip install -e .` so `sandy` is available as a shell command.
@@ -31,16 +31,32 @@ Each plugin is a `.py` file in `sandy/plugins/` that exposes:
 
 ### Matching (`matcher.py`)
 
-`matcher.py` owns the matching logic, exposed as `find_match(text, plugins) -> plugin | None`. `loader.py` is responsible only for discovery and validation.
+`matcher.py` owns the matching logic, exposed as `find_matches(text, plugins) -> list[plugin]`. `loader.py` is responsible only for discovery and validation.
 
 1. Iterates plugins in alphabetical order **by filename**
 2. Checks each command phrase against input (case-insensitive substring match)
-3. First match wins, calls `handle()`, prints result
-4. No match prints: `"I don't know how to do that yet."`
+3. **All** matching plugins are returned, not just the first — Sandy fans out to every plugin that claims the input
+4. No matches prints: `"I don't know how to do that yet."`
+
+### Output
+
+When multiple plugins match, each plugin's response is printed with a header identifying the plugin:
+
+```
+[spotify]
+New music from Release Radar:
+- Artist - Album - Track (link)
+
+[cryptics]
+Found 3 new puzzles:
+- ...
+```
+
+When only one plugin matches, the header is still shown for consistency.
 
 ### Error Handling
 
-If a matched plugin's `handle()` raises an exception at runtime, the CLI catches it, prints a friendly error message to stderr (e.g. `"spotify plugin failed: <error>"`), and exits with a non-zero status. It does not fall through to try other plugins.
+Each matched plugin's `handle()` is called independently. If a plugin raises an exception, the CLI prints a friendly error to stderr (e.g. `"spotify plugin failed: <error>"`) and continues to the remaining plugins. The CLI exits with non-zero status only if **all** matched plugins failed, or if no plugins matched. Partial success (some plugins worked, some failed) exits with status 0 and reports failures to stderr.
 
 ## First Plugin: Spotify
 
@@ -56,6 +72,10 @@ New music from Release Radar:
 - Artist - Album - Track (link)
 - Artist - Album - Track (link)
 ```
+
+## Future Plugin Example: Cryptic Crosswords
+
+Not built in MVP, but useful for validating the design. A plugin that checks a list of bookmarked URLs for new cryptic crossword puzzles. Demonstrates a different plugin shape: no API client, just HTTP fetches against a user-maintained list of sources. Also a good example of Sandy's "bring delight" goal — surfacing things you care about but don't check often enough.
 
 ## Project Structure
 
