@@ -71,10 +71,52 @@ def test_fetch_mad_dog_raises_when_no_puzzles():
             assert "No puzzles" in str(e)
 
 
+# --- _print_pdf ---
+
+
+def _mock_print_pdf(tmp_path, extra_patches=None):
+    """Helper: patch all I/O in _print_pdf and return mock_run."""
+    pdf_content = b"%PDF fake content"
+    mock_response = MagicMock(content=pdf_content)
+    mock_file = MagicMock()
+    mock_file.name = str(tmp_path / "puzzle.pdf")
+    patches = [
+        patch("sandy.plugins.cryptics.requests.get", return_value=mock_response),
+        patch("sandy.plugins.cryptics.subprocess.run"),
+        patch("sandy.plugins.cryptics.tempfile.NamedTemporaryFile"),
+        patch("sandy.plugins.cryptics.os.unlink"),
+        patch("sandy.plugins.cryptics.os.path.exists", return_value=False),
+    ]
+    return patches, mock_file
+
+
+def test_print_pdf_downloads_and_prints(tmp_path):
+    patches, mock_file = _mock_print_pdf(tmp_path)
+    with patches[0], patches[1] as mock_run, patches[2] as mock_tmp, patches[3], patches[4]:
+        mock_tmp.return_value.__enter__.return_value = mock_file
+        cryptics._print_pdf("https://example.com/puzzle.pdf")
+
+    mock_run.assert_called_once()
+    args = mock_run.call_args[0][0]
+    assert args[0] == "lpr"
+    assert "-P" in args
+
+
+def test_print_pdf_uses_sandy_printer_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("SANDY_PRINTER", "My_Custom_Printer")
+    patches, mock_file = _mock_print_pdf(tmp_path)
+    with patches[0], patches[1] as mock_run, patches[2] as mock_tmp, patches[3], patches[4]:
+        mock_tmp.return_value.__enter__.return_value = mock_file
+        cryptics._print_pdf("https://example.com/puzzle.pdf")
+
+    args = mock_run.call_args[0][0]
+    assert "My_Custom_Printer" in args
+
+
 # --- handle ---
 
 
-def test_handle_returns_source_name_and_links():
+def test_handle_prints_and_confirms():
     with patch.object(
         cryptics,
         "_fetch_hex",
@@ -83,10 +125,13 @@ def test_handle_returns_source_name_and_links():
         with patch(
             "sandy.plugins.cryptics.random.choice", return_value=("Hex", cryptics._fetch_hex)
         ):
-            result = cryptics.handle("crossword", "tom")
+            with patch.object(cryptics, "_print_pdf") as mock_print:
+                result = cryptics.handle("crossword", "tom")
+
+    mock_print.assert_called_once_with("https://example.com/p1.pdf")
+    assert "Printing" in result
     assert "Hex" in result
-    assert "https://example.com/p1" in result
-    assert "https://example.com/p1.pdf" in result
+    assert "http" not in result  # no URL in happy-path output
 
 
 def test_handle_fetch_failure():
@@ -97,3 +142,19 @@ def test_handle_fetch_failure():
         result = cryptics.handle("crossword", "tom")
     assert "couldn't fetch" in result.lower()
     assert "Hex" in result
+
+
+def test_handle_print_failure_includes_puzzle_url():
+    with patch.object(
+        cryptics,
+        "_fetch_hex",
+        return_value=("https://example.com/p1", "https://example.com/p1.pdf"),
+    ):
+        with patch(
+            "sandy.plugins.cryptics.random.choice", return_value=("Hex", cryptics._fetch_hex)
+        ):
+            with patch.object(cryptics, "_print_pdf", side_effect=Exception("printer offline")):
+                result = cryptics.handle("crossword", "tom")
+
+    assert "printing failed" in result.lower()
+    assert "https://example.com/p1" in result  # fallback URL so puzzle isn't lost

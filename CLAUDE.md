@@ -40,17 +40,22 @@ All matched plugins fail → exits non-zero.
 
 ## Current Plugins
 
-- **spotify** (`sandy/plugins/spotify.py`): pulls Release Radar via Spotify API
+- **spotify** (`sandy/plugins/spotify.py`): new releases from followed artists
   - Commands: `"find me new music"`, `"new music"`
   - Requires `.env` with `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`, `SPOTIPY_REDIRECT_URI`
   - Redirect URI must be `http://127.0.0.1:8888/callback` (not `localhost`) — Spotify dashboard must match
   - If `.cache` exists with a stale token, delete it and re-auth
 
+- **cryptics** (`sandy/plugins/cryptics.py`): random puzzle from Hex or Mad Dog Cryptics, sent to printer
+  - Commands: `"crossword"`
+  - Requires `SANDY_PRINTER` in `.env` (default: `Brother_MFC_L2750DW_series`); find yours with `lpstat -p`
+  - On print failure, returns the puzzle URL as fallback
+
 ## Development
 
 ```bash
 uv pip install -e .       # install in dev mode
-uv run pytest -v          # run all tests (28 tests as of MVP)
+uv run pytest -v          # run all tests
 uv run sandy "find me new music"
 ```
 
@@ -71,6 +76,4 @@ Always use `uv`, never `pip`.
 
 ## Known Issues / TODO
 
-See `docs/SPOTIFY-AUTH-TODO.md` for Spotify OAuth troubleshooting:
-1. Delete stale `.cache` if redirect URI changed
-2. `_find_release_radar()` needs pagination for users with 50+ playlists
+See `docs/SPOTIFY-AUTH-TODO.md` for Spotify OAuth troubleshooting.
