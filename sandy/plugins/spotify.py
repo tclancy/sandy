@@ -74,9 +74,11 @@ def handle(text: str, actor: str) -> str:
         for album in _get_recent_releases(sp, artist["id"], since):
             album_type = album["album_type"].capitalize()
             url = album["external_urls"].get("spotify", "")
-            lines.append(
-                f"- {artist['name']} — {album['name']} ({album_type}, {album['release_date']}) {url}"
+            entry = (
+                f"- {artist['name']} \u2014 {album['name']}"
+                f" ({album_type}, {album['release_date']}) {url}"
             )
+            lines.append(entry)
             found += 1
 
     if found == 0:

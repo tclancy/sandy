@@ -11,14 +11,17 @@ def _make_plugins(tmp_path, plugins):
 
 
 def test_main_routes_to_plugin(tmp_path, capsys):
-    plugin_dir = _make_plugins(tmp_path, {
-        "echo.py": """
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "echo.py": """
             name = "echo"
             commands = ["echo"]
             def handle(text, actor):
                 return f"echo: {text} (from {actor})"
         """
-    })
+        },
+    )
     with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
         exit_code = main(["echo this"])
     captured = capsys.readouterr()
@@ -28,20 +31,23 @@ def test_main_routes_to_plugin(tmp_path, capsys):
 
 
 def test_main_fan_out_multiple_matches(tmp_path, capsys):
-    plugin_dir = _make_plugins(tmp_path, {
-        "alpha.py": """
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "alpha.py": """
             name = "alpha"
             commands = ["summarize"]
             def handle(text, actor):
                 return "alpha summary"
         """,
-        "beta.py": """
+            "beta.py": """
             name = "beta"
             commands = ["summarize"]
             def handle(text, actor):
                 return "beta summary"
         """,
-    })
+        },
+    )
     with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
         exit_code = main(["summarize my day"])
     captured = capsys.readouterr()
@@ -53,14 +59,17 @@ def test_main_fan_out_multiple_matches(tmp_path, capsys):
 
 
 def test_main_no_match(tmp_path, capsys):
-    plugin_dir = _make_plugins(tmp_path, {
-        "echo.py": """
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "echo.py": """
             name = "echo"
             commands = ["echo"]
             def handle(text, actor):
                 return "ok"
         """
-    })
+        },
+    )
     with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
         exit_code = main(["unknown command"])
     captured = capsys.readouterr()
@@ -69,14 +78,17 @@ def test_main_no_match(tmp_path, capsys):
 
 
 def test_main_custom_actor(tmp_path, capsys):
-    plugin_dir = _make_plugins(tmp_path, {
-        "echo.py": """
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "echo.py": """
             name = "echo"
             commands = ["echo"]
             def handle(text, actor):
                 return f"echo: {text} (from {actor})"
         """
-    })
+        },
+    )
     with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
         exit_code = main(["--actor", "michelle", "echo this"])
     captured = capsys.readouterr()
@@ -86,20 +98,23 @@ def test_main_custom_actor(tmp_path, capsys):
 
 def test_main_partial_failure(tmp_path, capsys):
     """One plugin fails, another succeeds — partial success exits 0."""
-    plugin_dir = _make_plugins(tmp_path, {
-        "alpha.py": """
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "alpha.py": """
             name = "alpha"
             commands = ["test"]
             def handle(text, actor):
                 raise RuntimeError("kaboom")
         """,
-        "beta.py": """
+            "beta.py": """
             name = "beta"
             commands = ["test"]
             def handle(text, actor):
                 return "beta worked"
         """,
-    })
+        },
+    )
     with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
         exit_code = main(["test"])
     captured = capsys.readouterr()
@@ -112,14 +127,17 @@ def test_main_partial_failure(tmp_path, capsys):
 
 def test_main_all_matched_plugins_fail(tmp_path, capsys):
     """All matched plugins fail — exits non-zero."""
-    plugin_dir = _make_plugins(tmp_path, {
-        "boom.py": """
+    _make_plugins(
+        tmp_path,
+        {
+            "boom.py": """
             name = "boom"
             commands = ["boom"]
             def handle(text, actor):
                 raise RuntimeError("kaboom")
         """
-    })
+        },
+    )
     with patch("sandy.cli._get_plugin_dir", return_value=str(tmp_path)):
         exit_code = main(["boom"])
     captured = capsys.readouterr()
@@ -129,5 +147,4 @@ def test_main_all_matched_plugins_fail(tmp_path, capsys):
 
 def test_main_no_args(capsys):
     exit_code = main([])
-    captured = capsys.readouterr()
     assert exit_code == 1

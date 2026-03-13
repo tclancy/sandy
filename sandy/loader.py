@@ -18,8 +18,7 @@ def load_plugins(plugin_dir: str) -> list:
         return plugins
 
     filenames = sorted(
-        f for f in os.listdir(plugin_dir)
-        if f.endswith(".py") and f != "__init__.py"
+        f for f in os.listdir(plugin_dir) if f.endswith(".py") and f != "__init__.py"
     )
 
     for filename in filenames:

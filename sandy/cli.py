@@ -12,13 +12,9 @@ def _get_plugin_dir() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Route text commands to plugins."
-    )
+    parser = argparse.ArgumentParser(description="Route text commands to plugins.")
     parser.add_argument("text", nargs="?", help="The command text to process")
-    parser.add_argument(
-        "--actor", default="tom", help="Who is sending the command (default: tom)"
-    )
+    parser.add_argument("--actor", default="tom", help="Who is sending the command (default: tom)")
     args = parser.parse_args(argv)
 
     if not args.text:
