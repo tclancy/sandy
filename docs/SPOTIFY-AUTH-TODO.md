@@ -1,26 +1,37 @@
-# Spotify Auth Issues (2026-03-11)
+# Spotify Auth Notes
 
-## Problem 1: Redirect URI mismatch
+## OAuth Setup
 
-Spotify Developer Dashboard requires `http://127.0.0.1:8888/callback` (not `localhost`)
-due to SSL issues with `localhost`. The `.env` has been updated but spotipy cached a token
-from an earlier auth that used `localhost`. When the token expires and spotipy tries to
-re-authorize, it will hit "INVALID_CLIENT: Invalid redirect URI".
+Credentials go in `.env` (gitignored):
 
-### To fix
-1. Delete `.cache` in project root (spotipy token cache)
-2. Ensure `.env` has `SPOTIPY_REDIRECT_URI="http://127.0.0.1:8888/callback"`
-3. Ensure the same URI is registered in [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) → App Settings → Redirect URIs
-4. Run `sandy "find me new music"` — should open browser for fresh auth
-5. If it doesn't prompt for auth, the old token is still being reused from somewhere
+```env
+SPOTIPY_CLIENT_ID=...
+SPOTIPY_CLIENT_SECRET=...
+SPOTIPY_REDIRECT_URI=http://127.0.0.1:8888/callback
+```
 
-## Problem 2: Release Radar not found
+Scope required: `user-follow-read`
 
-Auth succeeds but `_find_release_radar()` can't find the playlist. Two likely causes:
+The redirect URI must be exactly `http://127.0.0.1:8888/callback` (not `localhost`) in both
+`.env` and the Spotify Developer Dashboard (App Settings → Redirect URIs).
 
-1. **Pagination**: `current_user_playlists()` only returns first 50 playlists. If Tom has 50+ playlists, Release Radar may be on a later page. Fix: paginate through all results.
-2. **Playlist name**: Release Radar might have a different name in some locales or Spotify versions.
+## First Run / Re-auth
 
-### To fix
-- Add pagination to `_find_release_radar()` in `sandy/plugins/spotify.py`
-- Consider searching by playlist description or owner (`spotify`) instead of exact name match
+Spotipy caches the token in `.cache` in the project root. On first run, or if the cache is
+stale or has the wrong scope, delete it and re-run:
+
+```bash
+rm .cache
+export $(grep -v '^#' .env | xargs) && .venv/bin/sandy "find me new music"
+```
+
+The browser will open for a one-time auth. After approving, `.cache` is written and subsequent
+runs are silent.
+
+## Why Not Release Radar
+
+Spotify removed access to algorithmic/personalized playlists (Release Radar, Discover Weekly)
+from the Web API in November 2024:
+[Spotify API changes Nov 2024](https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api)
+
+The plugin instead fetches recent releases from artists the user follows — more personal anyway.
