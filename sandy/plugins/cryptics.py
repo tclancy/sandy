@@ -6,41 +6,69 @@ import requests
 name = "cryptics"
 commands = ["crossword"]
 
-ARCHIVE_URL = "https://coxrathvon.com/"
-PUZZLE_URL = "https://coxrathvon.com/puzzles/{puzzle_id}/pdf"
-PUZZLE_PATTERN = re.compile(r'href="/puzzles/([^"]+)"')
+# --- Hex (Cox & Rathvon) ---
+
+_HEX_ARCHIVE_URL = "https://coxrathvon.com/"
+_HEX_PUZZLE_PATTERN = re.compile(r'href="/puzzles/([^"]+)"')
 
 
-def _fetch_puzzle_ids(archive_url: str = ARCHIVE_URL) -> list[str]:
-    """Fetch all puzzle IDs from the Hex archive homepage."""
-    response = requests.get(archive_url, timeout=10)
+def _fetch_hex() -> tuple[str, str]:
+    """Return (puzzle_page_url, pdf_url) for a random Hex puzzle."""
+    response = requests.get(_HEX_ARCHIVE_URL, timeout=10)
     response.raise_for_status()
-    return PUZZLE_PATTERN.findall(response.text)
+    puzzle_ids = _HEX_PUZZLE_PATTERN.findall(response.text)
+    if not puzzle_ids:
+        raise ValueError("No puzzles found in Hex archive.")
+    puzzle_id = random.choice(puzzle_ids)
+    puzzle_page = f"https://coxrathvon.com/puzzles/{puzzle_id}"
+    pdf_response = requests.get(f"{puzzle_page}/pdf", timeout=10, allow_redirects=True)
+    pdf_response.raise_for_status()
+    return puzzle_page, pdf_response.url
 
 
-def _resolve_pdf_url(puzzle_id: str) -> str:
-    """Follow the /pdf redirect to get the signed GCS URL."""
-    url = PUZZLE_URL.format(puzzle_id=puzzle_id)
-    response = requests.get(url, timeout=10, allow_redirects=True)
+# --- Mad Dog Cryptics ---
+
+_MAD_DOG_URL = "https://maddogcryptics.com/"
+_MAD_DOG_TITLE_PATTERN = re.compile(r"Mad Dog Cryptics #(\d+)</h2>")
+_MAD_DOG_PDF_PATTERN = re.compile(r'href="([^"]+\.pdf[^"]*)"')
+
+
+def _fetch_mad_dog() -> tuple[str, str]:
+    """Return (puzzle_page_url, pdf_url) for a random Mad Dog Cryptics puzzle."""
+    response = requests.get(_MAD_DOG_URL, timeout=10)
     response.raise_for_status()
-    return response.url
+    html = response.text
+
+    # Find all puzzle numbers, then pick one and find its PDF link.
+    numbers = _MAD_DOG_TITLE_PATTERN.findall(html)
+    if not numbers:
+        raise ValueError("No puzzles found on Mad Dog Cryptics.")
+    number = random.choice(numbers)
+
+    # Find the section for this puzzle number and extract the first PDF href.
+    section_match = re.search(rf"Mad Dog Cryptics #{number}</h2>(.*?)(?=<h2|$)", html, re.DOTALL)
+    if not section_match:
+        raise ValueError(f"Couldn't find section for Mad Dog Cryptics #{number}.")
+    pdf_match = _MAD_DOG_PDF_PATTERN.search(section_match.group(1))
+    if not pdf_match:
+        raise ValueError(f"Couldn't find PDF link for Mad Dog Cryptics #{number}.")
+
+    puzzle_page = f"{_MAD_DOG_URL}#{number}"
+    return puzzle_page, pdf_match.group(1)
+
+
+# --- Sources registry ---
+
+SOURCES = [
+    ("Hex", _fetch_hex),
+    ("Mad Dog Cryptics", _fetch_mad_dog),
+]
 
 
 def handle(text: str, actor: str) -> str:
+    source_name, fetcher = random.choice(SOURCES)
     try:
-        puzzle_ids = _fetch_puzzle_ids()
+        puzzle_page, pdf_url = fetcher()
     except Exception as e:
-        return f"Couldn't fetch crossword archive: {e}"
-
-    if not puzzle_ids:
-        return "No puzzles found in the archive."
-
-    puzzle_id = random.choice(puzzle_ids)
-    puzzle_page = f"https://coxrathvon.com/puzzles/{puzzle_id}"
-
-    try:
-        pdf_url = _resolve_pdf_url(puzzle_id)
-    except Exception as e:
-        return f"Found puzzle {puzzle_page} but couldn't resolve PDF: {e}"
-
-    return f"Here's your cryptic crossword:\n{puzzle_page}\nPDF: {pdf_url}"
+        return f"Couldn't fetch a crossword from {source_name}: {e}"
+    return f"Here's your cryptic crossword (from {source_name}):\n{puzzle_page}\nPDF: {pdf_url}"

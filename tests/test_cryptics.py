@@ -3,10 +3,16 @@ from unittest.mock import patch, MagicMock
 from sandy.plugins import cryptics
 
 
-FAKE_ARCHIVE_HTML = """
+FAKE_HEX_HTML = """
 <a href="/puzzles/abc123">Puzzle One</a>
 <a href="/puzzles/def456">Puzzle Two</a>
-<a href="/puzzles/ghi789">Puzzle Three</a>
+"""
+
+FAKE_MAD_DOG_HTML = """
+<h2>Mad Dog Cryptics #31</h2>
+<a href="https://www.dropbox.com/puzzle31.pdf?dl=0">PDF</a>
+<h2>Mad Dog Cryptics #30</h2>
+<a href="https://www.dropbox.com/puzzle30.pdf?dl=0">PDF</a>
 """
 
 
@@ -18,46 +24,76 @@ def test_cryptics_commands():
     assert "crossword" in cryptics.commands
 
 
-def test_fetch_puzzle_ids_parses_links():
-    mock_response = MagicMock()
-    mock_response.text = FAKE_ARCHIVE_HTML
-    with patch("sandy.plugins.cryptics.requests.get", return_value=mock_response):
-        ids = cryptics._fetch_puzzle_ids()
-    assert ids == ["abc123", "def456", "ghi789"]
+# --- Hex ---
 
 
-def test_resolve_pdf_url_follows_redirect():
-    mock_response = MagicMock()
-    mock_response.url = "https://storage.googleapis.com/bucket/puzzle.pdf?sig=abc"
-    with patch("sandy.plugins.cryptics.requests.get", return_value=mock_response):
-        url = cryptics._resolve_pdf_url("abc123")
-    assert url == "https://storage.googleapis.com/bucket/puzzle.pdf?sig=abc"
+def test_fetch_hex_returns_puzzle_and_pdf():
+    archive_response = MagicMock(text=FAKE_HEX_HTML)
+    pdf_response = MagicMock(url="https://storage.googleapis.com/bucket/puzzle.pdf")
+
+    with patch("sandy.plugins.cryptics.requests.get", side_effect=[archive_response, pdf_response]):
+        puzzle_page, pdf_url = cryptics._fetch_hex()
+
+    assert "coxrathvon.com/puzzles/" in puzzle_page
+    assert pdf_url == "https://storage.googleapis.com/bucket/puzzle.pdf"
 
 
-def test_handle_returns_puzzle_and_pdf():
-    pdf_url = "https://storage.googleapis.com/bucket/puzzle.pdf?sig=abc"
-    with patch.object(cryptics, "_fetch_puzzle_ids", return_value=["abc123"]):
-        with patch.object(cryptics, "_resolve_pdf_url", return_value=pdf_url):
-            result = cryptics.handle("crossword, please", "tom")
-    assert "https://coxrathvon.com/puzzles/abc123" in result
-    assert pdf_url in result
+def test_fetch_hex_raises_when_no_puzzles():
+    empty_response = MagicMock(text="<html>nothing here</html>")
+    with patch("sandy.plugins.cryptics.requests.get", return_value=empty_response):
+        try:
+            cryptics._fetch_hex()
+            assert False, "should have raised"
+        except ValueError as e:
+            assert "No puzzles" in str(e)
 
 
-def test_handle_archive_fetch_failure():
-    with patch.object(cryptics, "_fetch_puzzle_ids", side_effect=Exception("timeout")):
-        result = cryptics.handle("crossword, please", "tom")
+# --- Mad Dog ---
+
+
+def test_fetch_mad_dog_returns_puzzle_and_pdf():
+    response = MagicMock(text=FAKE_MAD_DOG_HTML)
+    with patch("sandy.plugins.cryptics.requests.get", return_value=response):
+        with patch("sandy.plugins.cryptics.random.choice", return_value="31"):
+            puzzle_page, pdf_url = cryptics._fetch_mad_dog()
+
+    assert "#31" in puzzle_page
+    assert "puzzle31.pdf" in pdf_url
+
+
+def test_fetch_mad_dog_raises_when_no_puzzles():
+    response = MagicMock(text="<html>nothing here</html>")
+    with patch("sandy.plugins.cryptics.requests.get", return_value=response):
+        try:
+            cryptics._fetch_mad_dog()
+            assert False, "should have raised"
+        except ValueError as e:
+            assert "No puzzles" in str(e)
+
+
+# --- handle ---
+
+
+def test_handle_returns_source_name_and_links():
+    with patch.object(
+        cryptics,
+        "_fetch_hex",
+        return_value=("https://example.com/p1", "https://example.com/p1.pdf"),
+    ):
+        with patch(
+            "sandy.plugins.cryptics.random.choice", return_value=("Hex", cryptics._fetch_hex)
+        ):
+            result = cryptics.handle("crossword", "tom")
+    assert "Hex" in result
+    assert "https://example.com/p1" in result
+    assert "https://example.com/p1.pdf" in result
+
+
+def test_handle_fetch_failure():
+    def boom():
+        raise Exception("network error")
+
+    with patch("sandy.plugins.cryptics.random.choice", return_value=("Hex", boom)):
+        result = cryptics.handle("crossword", "tom")
     assert "couldn't fetch" in result.lower()
-
-
-def test_handle_empty_archive():
-    with patch.object(cryptics, "_fetch_puzzle_ids", return_value=[]):
-        result = cryptics.handle("crossword, please", "tom")
-    assert "no puzzles" in result.lower()
-
-
-def test_handle_pdf_resolve_failure():
-    with patch.object(cryptics, "_fetch_puzzle_ids", return_value=["abc123"]):
-        with patch.object(cryptics, "_resolve_pdf_url", side_effect=Exception("404")):
-            result = cryptics.handle("crossword, please", "tom")
-    assert "couldn't resolve pdf" in result.lower()
-    assert "coxrathvon.com/puzzles/abc123" in result
+    assert "Hex" in result
