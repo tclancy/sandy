@@ -4,7 +4,7 @@ import re
 import requests
 
 name = "cryptics"
-commands = ["crossword, please"]
+commands = ["crossword"]
 
 ARCHIVE_URL = "https://coxrathvon.com/"
 PUZZLE_URL = "https://coxrathvon.com/puzzles/{puzzle_id}/pdf"

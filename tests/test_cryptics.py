@@ -15,7 +15,7 @@ def test_cryptics_name():
 
 
 def test_cryptics_commands():
-    assert "crossword, please" in cryptics.commands
+    assert "crossword" in cryptics.commands
 
 
 def test_fetch_puzzle_ids_parses_links():
