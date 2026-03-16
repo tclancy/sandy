@@ -2,17 +2,23 @@ import importlib.util
 import os
 import sys
 
+from sandy.config import is_active
+
 
 REQUIRED_ATTRS = ("name", "commands", "handle")
 
 
-def load_plugins(plugin_dir: str) -> list:
+def load_plugins(plugin_dir: str, config: dict | None = None) -> list:
     """Discover and load valid plugins from a directory.
 
     Imports each .py file (except __init__.py), validates it has the
     required attributes (name, commands, handle) with handle being
     callable, and returns valid plugins sorted alphabetically by filename.
+
+    Plugins disabled in *config* (active = no) are skipped silently.
     """
+    if config is None:
+        config = {}
     plugins = []
     if not os.path.isdir(plugin_dir):
         return plugins
@@ -51,6 +57,9 @@ def load_plugins(plugin_dir: str) -> list:
                 f"Warning: skipping {filename}: handle is not callable",
                 file=sys.stderr,
             )
+            continue
+
+        if not is_active(config, module.name):
             continue
 
         plugins.append(module)
