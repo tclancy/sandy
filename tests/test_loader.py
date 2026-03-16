@@ -119,3 +119,35 @@ def test_skip_non_callable_handle(tmp_path, capsys):
 def test_empty_directory(tmp_path):
     plugins = load_plugins(str(tmp_path))
     assert plugins == []
+
+
+def test_inactive_plugin_skipped(tmp_path):
+    _write_plugin(
+        tmp_path,
+        "myplugin.py",
+        """
+        name = "myplugin"
+        commands = ["do thing"]
+        def handle(text, actor):
+            return "done"
+    """,
+    )
+    config = {"myplugin": {"active": "no"}}
+    plugins = load_plugins(str(tmp_path), config)
+    assert len(plugins) == 0
+
+
+def test_active_plugin_included(tmp_path):
+    _write_plugin(
+        tmp_path,
+        "myplugin.py",
+        """
+        name = "myplugin"
+        commands = ["do thing"]
+        def handle(text, actor):
+            return "done"
+    """,
+    )
+    config = {"myplugin": {"active": "yes"}}
+    plugins = load_plugins(str(tmp_path), config)
+    assert len(plugins) == 1

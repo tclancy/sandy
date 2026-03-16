@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 
+from sandy.config import apply_env, load_config
 from sandy.loader import load_plugins
 from sandy.matcher import find_matches
 
@@ -21,8 +22,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_usage(file=sys.stderr)
         return 1
 
+    config = load_config()
+    apply_env(config)
+
     plugin_dir = _get_plugin_dir()
-    plugins = load_plugins(plugin_dir)
+    plugins = load_plugins(plugin_dir, config)
     matches = find_matches(args.text, plugins)
 
     if not matches:

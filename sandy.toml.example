@@ -1,0 +1,48 @@
+# sandy.toml — Sandy configuration file
+#
+# Copy this file to one of these locations:
+#   ~/.config/sandy/sandy.toml   (recommended — keeps secrets out of project)
+#   ./sandy.toml                 (project root, for local dev)
+#
+# Conventions:
+#   UPPERCASE keys = environment variables (secrets, tokens, API keys)
+#   lowercase keys = configuration values  (e.g. active = yes/no)
+#
+# active = yes/no controls whether Sandy loads a plugin at all.
+# Active is case-insensitive: yes, YES, Yes all work.
+# If a plugin has no section here, it is active by default.
+
+
+# ---- Global environment variables ----
+# These apply to all plugins.
+
+# Printer used by the cryptics plugin (run `lpstat -p` to find yours)
+# SANDY_PRINTER = "Brother_MFC_L2750DW_series"
+
+
+# ---- Spotify Plugin ----
+[spotify]
+active = yes
+
+SPOTIPY_CLIENT_ID     = "your-client-id-here"
+SPOTIPY_CLIENT_SECRET = "your-client-secret-here"
+SPOTIPY_REDIRECT_URI  = "http://127.0.0.1:8888/callback"
+
+
+# ---- Cryptics Plugin ----
+[cryptics]
+active = yes
+
+# SANDY_PRINTER = "Brother_MFC_L2750DW_series"
+
+
+# ---- Real Men Plugin ----
+[real_men]
+active = yes
+
+
+# ---- Hardcover Plugin ----
+[hardcover]
+active = yes
+
+HARDCOVER_API_KEY = "your-hardcover-api-key-here"
