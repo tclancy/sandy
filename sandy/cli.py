@@ -9,7 +9,8 @@ def _format_text(plugin_name: str, response: dict) -> str:
     lines = [f"[{plugin_name}]"]
     if "title" in response:
         lines.append(response["title"])
-    lines.append(response.get("text", ""))
+    if "text" in response:
+        lines.append(response["text"])
     if "links" in response:
         for link in response["links"]:
             lines.append(f"  {link['label']}: {link['url']}")
