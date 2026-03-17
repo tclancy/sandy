@@ -50,4 +50,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def cli():
     """Entry point for the `sandy` console script."""
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\nWrapping up early today!")
+        sys.exit(0)
