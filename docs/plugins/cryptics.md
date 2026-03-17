@@ -11,7 +11,8 @@ usually hard enough I don't remember the answers. So:
 - random link
 - add `/pdf` to the link
 - request and follow the redirect
-- for now just return the link
+- print the PDF
 
-If this all looks good, we can have the plugin kick off printing the PDF
-automatically.
+Plugin now does the same for multiple cryptic sites, Hex and Mad Dog. Adding
+additional sites is just a matter of a URL and a way to extract printable
+puzzles.
