@@ -1,6 +1,64 @@
 import textwrap
 from unittest.mock import patch
-from sandy.cli import cli, main
+from sandy.cli import _format_links, _format_text, _format_title, _render_response, cli, main
+
+
+# --- field formatter unit tests ---
+
+
+def test_format_title_returns_value_in_list():
+    assert _format_title("My Title") == ["My Title"]
+
+
+def test_format_text_returns_value_in_list():
+    assert _format_text("Hello world") == ["Hello world"]
+
+
+def test_format_links_formats_each_link():
+    links = [
+        {"label": "Spotify", "url": "https://open.spotify.com/album/abc"},
+        {"label": "Apple Music", "url": "https://music.apple.com/album/abc"},
+    ]
+    result = _format_links(links)
+    assert result == [
+        "  Spotify: https://open.spotify.com/album/abc",
+        "  Apple Music: https://music.apple.com/album/abc",
+    ]
+
+
+def test_render_response_title_only():
+    out = _render_response("myplugin", {"title": "A Title"})
+    assert out == "[myplugin]\nA Title"
+
+
+def test_render_response_text_only():
+    out = _render_response("myplugin", {"text": "Some text"})
+    assert out == "[myplugin]\nSome text"
+
+
+def test_render_response_links_only():
+    out = _render_response("myplugin", {"links": [{"label": "X", "url": "http://x.com"}]})
+    assert out == "[myplugin]\n  X: http://x.com"
+
+
+def test_render_response_all_fields():
+    out = _render_response(
+        "myplugin",
+        {
+            "title": "Headlines",
+            "text": "Body text here.",
+            "links": [{"label": "Read more", "url": "http://example.com"}],
+        },
+    )
+    assert out == "[myplugin]\nHeadlines\nBody text here.\n  Read more: http://example.com"
+
+
+def test_render_response_unknown_keys_skipped():
+    out = _render_response("myplugin", {"text": "hi", "future_field": "ignored"})
+    assert out == "[myplugin]\nhi"
+
+
+# --- integration tests ---
 
 
 def _make_plugins(tmp_path, plugins):
