@@ -1,6 +1,6 @@
 import textwrap
 from unittest.mock import patch
-from sandy.cli import main
+from sandy.cli import cli, main
 
 
 def _make_plugins(tmp_path, plugins):
@@ -148,3 +148,15 @@ def test_main_all_matched_plugins_fail(tmp_path, capsys):
 def test_main_no_args(capsys):
     exit_code = main([])
     assert exit_code == 1
+
+
+def test_cli_keyboard_interrupt(capsys):
+    """CTRL-C during execution exits cleanly with a friendly message."""
+    import pytest
+
+    with patch("sandy.cli.main", side_effect=KeyboardInterrupt):
+        with pytest.raises(SystemExit) as exc_info:
+            cli()
+    captured = capsys.readouterr()
+    assert "Wrapping up early today!" in captured.out
+    assert exc_info.value.code == 0
