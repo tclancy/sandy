@@ -75,13 +75,13 @@ The CLI is a special case — it doesn't `listen()`, it calls the pipeline direc
 
 ### Daemon
 
-Started via `sandy serve` — a new subcommand. Runs on the target machine (e.g., homelab). On startup: loads all plugins (content + transport), calls `listen()` on each active transport plugin. The daemon owns the event loop. Handles SIGTERM/SIGINT gracefully (clean shutdown, close transport connections).
+Started via `sandy serve` — a new subcommand. Runs on the target machine (e.g., homelab). On startup: loads all plugins (content + transport) once and caches them, then calls `listen()` on each active transport plugin. The daemon owns the event loop. Handles SIGTERM/SIGINT gracefully (clean shutdown, close transport connections).
 
 ### Message Flow
 
 1. Transport receives input (e.g., Slack message in a DM or channel)
 2. Transport calls `callback(text, actor, reply_fn)` — actor derived from the channel (e.g., Slack username)
-3. Callback runs the core pipeline: load content plugins, match, call `handle()` on each match, collect response dicts
+3. Callback runs the core pipeline: match against cached content plugins, call `handle()` on each match, collect response dicts
 4. Callback passes each `(plugin_name, response_dict)` pair back to `reply_fn`
 5. `reply_fn` is owned by the transport — it calls its own `format_response()` internally and delivers the result through the channel
 
