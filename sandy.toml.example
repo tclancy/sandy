@@ -46,3 +46,16 @@ active = yes
 active = yes
 
 HARDCOVER_API_KEY = "your-hardcover-api-key-here"
+
+
+# ---- Daemon Configuration ----
+# Controls which transports are active when running `sandy serve`
+[daemon]
+transports = ["slack"]
+
+
+# ---- Slack Transport ----
+[slack]
+# Get these from https://api.slack.com/apps — Socket Mode must be enabled
+SLACK_APP_TOKEN = "xapp-..."
+SLACK_BOT_TOKEN = "xoxb-..."
