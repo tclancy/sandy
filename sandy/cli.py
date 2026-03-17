@@ -2,11 +2,18 @@ import argparse
 import sys
 
 from sandy.pipeline import run_pipeline
+from sandy.progress import make_reporter
 
 
-def _format_text(plugin_name: str, response: dict) -> str:
-    """Format a plugin response dict as plain text for the CLI."""
+def _format_text(plugin_name: str, response) -> str:
+    """Format a plugin response as plain text for the CLI.
+
+    Handles both legacy string responses and the standard dict response format.
+    """
     lines = [f"[{plugin_name}]"]
+    if isinstance(response, str):
+        lines.append(response)
+        return "\n".join(lines)
     if "title" in response:
         lines.append(response["title"])
     if "text" in response:
@@ -37,7 +44,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_usage(file=sys.stderr)
         return 1
 
-    results, errors = run_pipeline(args.text, args.actor)
+    results, errors = run_pipeline(
+        args.text,
+        args.actor,
+        progress_factory=make_reporter,
+    )
 
     for error in errors:
         print(error, file=sys.stderr)

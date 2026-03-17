@@ -1,14 +1,26 @@
 """Core pipeline: match text against plugins, run handlers, collect results."""
 
+import inspect
 import os
+from typing import Callable
 
 from sandy.config import apply_env, load_config
 from sandy.loader import load_plugins
 from sandy.matcher import find_matches
+from sandy.progress import ProgressFn
 
 
 def _default_plugin_dir() -> str:
     return os.path.join(os.path.dirname(__file__), "plugins")
+
+
+def _accepts_progress(plugin) -> bool:
+    """Return True if the plugin's handle() accepts a ``progress`` parameter."""
+    try:
+        sig = inspect.signature(plugin.handle)
+        return "progress" in sig.parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def run_pipeline(
@@ -17,7 +29,8 @@ def run_pipeline(
     plugin_dir: str | None = None,
     config: dict | None = None,
     plugins: list | None = None,
-) -> tuple[list[tuple[str, dict]], list[str]]:
+    progress_factory: Callable[[str], ProgressFn | None] | None = None,
+) -> tuple[list[tuple[str, object]], list[str]]:
     """Run the Sandy pipeline: match text, call handlers, collect results.
 
     Args:
@@ -26,9 +39,13 @@ def run_pipeline(
         plugin_dir: Directory to load plugins from. Ignored if plugins provided.
         config: Config dict. Loaded from default locations if None.
         plugins: Pre-loaded plugin list. If provided, skips loading.
+        progress_factory: Optional callable that takes a plugin name and returns
+            a progress reporter (or None to suppress progress).  When provided,
+            the reporter is passed to plugins whose ``handle()`` accepts a
+            ``progress`` keyword argument.
 
     Returns:
-        (results, errors) where results is a list of (plugin_name, response_dict)
+        (results, errors) where results is a list of (plugin_name, response)
         and errors is a list of error message strings.
     """
     if config is None:
@@ -45,10 +62,20 @@ def run_pipeline(
     results = []
     errors = []
     for match in matches:
+        reporter = None
+        if progress_factory is not None:
+            reporter = progress_factory(match.name)
+
         try:
-            response = match.handle(text, actor)
+            if reporter is not None and _accepts_progress(match):
+                response = match.handle(text, actor, progress=reporter)
+            else:
+                response = match.handle(text, actor)
             results.append((match.name, response))
         except Exception as e:
             errors.append(f"{match.name} plugin failed: {e}")
+        finally:
+            if reporter is not None and hasattr(reporter, "clear"):
+                reporter.clear()
 
     return results, errors

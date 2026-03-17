@@ -55,12 +55,14 @@ def _get_recent_releases(sp: spotipy.Spotify, artist_id: str, since: datetime) -
     return releases
 
 
-def handle(text: str, actor: str) -> dict:
+def handle(text: str, actor: str, progress=None) -> dict:
     try:
         sp = _get_spotify_client()
     except Exception as e:
         return {"text": f"Spotify auth failed: {e}"}
 
+    if progress:
+        progress("Loading followed artists…")
     since = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
     artists = _get_followed_artists(sp)
 
@@ -71,7 +73,9 @@ def handle(text: str, actor: str) -> dict:
     links = []
     found = 0
 
-    for artist in artists:
+    for i, artist in enumerate(artists):
+        if progress:
+            progress(f"Checking {artist['name']} ({i + 1}/{len(artists)})")
         for album in _get_recent_releases(sp, artist["id"], since):
             album_type = album["album_type"].capitalize()
             url = album["external_urls"].get("spotify", "")
