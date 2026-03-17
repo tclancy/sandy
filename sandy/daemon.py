@@ -54,7 +54,7 @@ class Daemon:
         tasks = []
         for transport in self.transports:
 
-            async def callback(text, actor, reply_fn, _transport=transport):
+            async def callback(text, actor, reply_fn):
                 results, errors = await self.handle_message(text, actor)
                 for plugin_name, response in results:
                     await reply_fn(plugin_name, response)
