@@ -18,6 +18,16 @@ def _format_text(plugin_name: str, response: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Handle `sandy serve` before argparse (avoids subparser/positional conflict)
+    if argv and argv[0] == "serve":
+        from sandy.daemon import serve
+
+        serve()
+        return 0
+
     parser = argparse.ArgumentParser(description="Route text commands to plugins.")
     parser.add_argument("text", nargs="?", help="The command text to process")
     parser.add_argument("--actor", default="tom", help="Who is sending the command (default: tom)")
