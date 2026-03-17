@@ -126,8 +126,8 @@ def test_handle_returns_title(monkeypatch):
     monkeypatch.setattr(real_men, "_play_mp3", lambda url: None)
 
     result = real_men.handle("tell me about a real man", "tom")
-    assert "Amazing Guy" in result
-    assert "Real Men of Genius" in result
+    assert "Amazing Guy" in result["text"]
+    assert "Real Men of Genius" in result["text"]
 
 
 def test_handle_raises_when_no_tracks(monkeypatch):

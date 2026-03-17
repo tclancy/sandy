@@ -94,16 +94,19 @@ def _print_pdf(pdf_url: str) -> None:
             os.unlink(ps_path)
 
 
-def handle(text: str, actor: str) -> str:
+def handle(text: str, actor: str) -> dict:
     source_name, fetcher = random.choice(SOURCES)
     try:
         puzzle_page, pdf_url = fetcher()
     except Exception as e:
-        return f"Couldn't fetch a crossword from {source_name}: {e}"
+        return {"text": f"Couldn't fetch a crossword from {source_name}: {e}"}
 
     try:
         _print_pdf(pdf_url)
     except Exception as e:
-        return f"Got a puzzle from {source_name} but printing failed: {e}\n{puzzle_page}"
+        return {
+            "text": f"Got a puzzle from {source_name} but printing failed: {e}",
+            "links": [{"label": f"{source_name} puzzle", "url": puzzle_page}],
+        }
 
-    return f"Printing your crossword from {source_name}. Enjoy!"
+    return {"text": f"Printing your crossword from {source_name}. Enjoy!"}

@@ -41,7 +41,7 @@ def _play_mp3(url: str) -> None:
         os.unlink(tmp_path)
 
 
-def handle(text: str, actor: str) -> str:
+def handle(text: str, actor: str) -> dict:
     urls = _get_mp3_urls()
     if not urls:
         raise ValueError("No Real Men of Genius tracks found.")
@@ -50,4 +50,4 @@ def handle(text: str, actor: str) -> str:
     filename = url.split("/")[-1]
     title = requests.utils.unquote(filename).removesuffix(".mp3")
     _play_mp3(url)
-    return f"Real Men of Genius presents: {title}"
+    return {"text": f"Real Men of Genius presents: {title}"}

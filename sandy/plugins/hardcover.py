@@ -122,7 +122,7 @@ def _build_search_url(title: str) -> str:
     return f"{_KOHA_BASE}?q={quote_plus(clean)}{_KOHA_LIMITS}"
 
 
-def handle(text: str, actor: str) -> str:
+def handle(text: str, actor: str) -> dict:
     token = _get_token()
     want_to_read = _fetch_want_to_read(token)
     in_dover = _fetch_in_dover(token)
@@ -131,8 +131,14 @@ def handle(text: str, actor: str) -> str:
     candidates = [b for b in in_dover if b["id"] in want_ids]
 
     if not candidates:
-        return "No books found that are both in your Dover list and on your Want to Read shelf."
+        no_books_msg = (
+            "No books found that are both in your Dover list and on your Want to Read shelf."
+        )
+        return {"text": no_books_msg}
 
     book = random.choice(candidates)
     url = _build_search_url(book["title"])
-    return f"{book['title']} by {book['author']}\nReserve at Dover Library: {url}"
+    return {
+        "text": f"{book['title']} by {book['author']}",
+        "links": [{"label": "Reserve at Dover Library", "url": url}],
+    }
