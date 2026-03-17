@@ -34,7 +34,7 @@ def handle(text: str, actor: str) -> dict:
 
 The dict is a loose contract — plugins include whatever fields make sense. Only `text` is required. Transport plugins use what they understand and ignore the rest.
 
-**Breaking change:** `handle()` returns a `dict` instead of a `str`. All existing plugins (spotify, cryptics, hardcover, real_men) must be updated.
+**Breaking change:** `handle()` returns a `dict` instead of a `str`. All existing plugins (spotify, cryptics, hardcover, real_men) must be updated. This is an atomic change — all content plugins, the CLI output formatting, and all tests are updated in a single step. There is no compatibility shim; the old string return format is simply replaced.
 
 ### Transport Plugins (new)
 
@@ -42,7 +42,6 @@ Receive messages from a channel and deliver responses back. Live in `sandy/trans
 
 ```python
 name: str                    # "slack"
-transport: bool = True       # distinguishes from content plugins
 
 async def listen(callback):
     """Receive messages, call callback(text, actor, reply_fn) for each."""
@@ -52,6 +51,8 @@ def format_response(plugin_name: str, response: dict) -> Any:
     """Translate a content plugin's response dict into channel-native format."""
     ...
 ```
+
+Transport plugins are distinguished from content plugins by directory (`sandy/transports/` vs `sandy/plugins/`), not by a flag.
 
 The CLI is a special case — it doesn't `listen()`, it calls the pipeline directly and formats response dicts as plain text to stdout.
 
@@ -74,14 +75,17 @@ The CLI is a special case — it doesn't `listen()`, it calls the pipeline direc
 
 ### Daemon
 
-Runs on the target machine (e.g., homelab). On startup: loads all plugins (content + transport), calls `listen()` on each active transport plugin. The daemon owns the event loop.
+Started via `sandy serve` — a new subcommand. Runs on the target machine (e.g., homelab). On startup: loads all plugins (content + transport), calls `listen()` on each active transport plugin. The daemon owns the event loop. Handles SIGTERM/SIGINT gracefully (clean shutdown, close transport connections).
 
 ### Message Flow
 
 1. Transport receives input (e.g., Slack message in a DM or channel)
 2. Transport calls `callback(text, actor, reply_fn)` — actor derived from the channel (e.g., Slack username)
 3. Callback runs the core pipeline: load content plugins, match, call `handle()` on each match, collect response dicts
-4. For each response dict, call the transport's `format_response()`, deliver back through `reply_fn`
+4. Callback passes each `(plugin_name, response_dict)` pair back to `reply_fn`
+5. `reply_fn` is owned by the transport — it calls its own `format_response()` internally and delivers the result through the channel
+
+The transport owns the full output path: it provides `reply_fn`, which knows how to format and deliver. The daemon's callback is only responsible for running the core pipeline and calling `reply_fn` with the raw results.
 
 ### Async Model
 
