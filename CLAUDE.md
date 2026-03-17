@@ -19,12 +19,18 @@ Fan-out model: **all** matching plugins respond to a command, not just the first
 ```
 sandy "some text"
   → cli.py (argparse, --actor flag)
-  → loader.py (discovers + validates plugins from sandy/plugins/)
-  → matcher.py (case-insensitive substring match, returns ALL matches)
-  → each matching plugin's handle(text, actor) → stdout
+  → pipeline.py (run_pipeline: loader → matcher → handlers)
+  → each matching plugin's handle(text, actor) → dict → stdout (formatted as plain text)
+
+sandy serve
+  → daemon.py (asyncio event loop, loads plugins once)
+  → transport_loader.py (discovers transports from sandy/transports/)
+  → each transport's listen() receives messages
+  → pipeline.py routes to content plugins
+  → transport's format_response() delivers back through channel
 ```
 
-No daemon. No server. No database. Stateless by design.
+CLI mode is stateless. Daemon mode (`sandy serve`) is long-running and transport-driven.
 
 ## Plugin Contract
 
@@ -32,11 +38,33 @@ Each plugin is a `.py` file in `sandy/plugins/` that exposes:
 
 - `name: str` — human-readable name (e.g. `"spotify"`)
 - `commands: list[str]` — phrases to match (case-insensitive substring)
-- `handle(text: str, actor: str) -> str` — returns response string
+- `handle(text: str, actor: str) -> dict` — returns response dict with:
+  - `text` (required): plain text response
+  - `title` (optional): heading
+  - `links` (optional): list of `{"label": str, "url": str}`
+  - `image_url` (optional): image URL
 
 Malformed plugins are skipped with a stderr warning, not a crash.
 Partial plugin failure (some succeed, some raise) exits 0.
 All matched plugins fail → exits non-zero.
+
+## Transport Plugin Contract
+
+Each transport is a `.py` file in `sandy/transports/` that exposes:
+
+- `name: str` — transport identifier (e.g. `"slack"`)
+- `async listen(callback)` — start listening, call `callback(text, actor, reply_fn)` for each message
+- `format_response(plugin_name: str, response: dict) -> Any` — translate response dict to channel format
+
+## Daemon Mode
+
+`sandy serve` starts the daemon, which loads all plugins once and listens on configured transports.
+Configure active transports in `sandy.toml`:
+
+```toml
+[daemon]
+transports = ["slack"]
+```
 
 ## Current Plugins
 
@@ -50,6 +78,12 @@ All matched plugins fail → exits non-zero.
   - Commands: `"crossword"`
   - Requires `SANDY_PRINTER` in `.env` (default: `Brother_MFC_L2750DW_series`); find yours with `lpstat -p`
   - On print failure, returns the puzzle URL as fallback
+
+- **slack** (`sandy/transports/slack.py`): Slack transport via Socket Mode
+  - Requires `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN` in `.env` or `sandy.toml`
+  - Socket Mode: no public URL needed, works behind NAT
+  - Block Kit formatting for rich responses
+  - Responds to DMs and @mentions
 
 ## Development
 
