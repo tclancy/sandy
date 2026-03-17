@@ -39,7 +39,7 @@ def format_response(plugin_name: str, response: dict) -> dict:
             }
         )
 
-    if "links" in response:
+    if response.get("links"):
         link_lines = [f"<{link['url']}|{link['label']}>" for link in response["links"]]
         blocks.append(
             {
