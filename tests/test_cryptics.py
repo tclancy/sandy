@@ -129,9 +129,9 @@ def test_handle_prints_and_confirms():
                 result = cryptics.handle("crossword", "tom")
 
     mock_print.assert_called_once_with("https://example.com/p1.pdf")
-    assert "Printing" in result
-    assert "Hex" in result
-    assert "http" not in result  # no URL in happy-path output
+    assert "Printing" in result["text"]
+    assert "Hex" in result["text"]
+    assert "http" not in result["text"]  # no URL in happy-path output
 
 
 def test_handle_fetch_failure():
@@ -140,8 +140,8 @@ def test_handle_fetch_failure():
 
     with patch("sandy.plugins.cryptics.random.choice", return_value=("Hex", boom)):
         result = cryptics.handle("crossword", "tom")
-    assert "couldn't fetch" in result.lower()
-    assert "Hex" in result
+    assert "couldn't fetch" in result["text"].lower()
+    assert "Hex" in result["text"]
 
 
 def test_handle_print_failure_includes_puzzle_url():
@@ -156,5 +156,6 @@ def test_handle_print_failure_includes_puzzle_url():
             with patch.object(cryptics, "_print_pdf", side_effect=Exception("printer offline")):
                 result = cryptics.handle("crossword", "tom")
 
-    assert "printing failed" in result.lower()
-    assert "https://example.com/p1" in result  # fallback URL so puzzle isn't lost
+    assert "printing failed" in result["text"].lower()
+    links = result.get("links", [])
+    assert any("example.com/p1" in link.get("url", "") for link in links)

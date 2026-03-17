@@ -18,11 +18,11 @@ def test_main_routes_to_plugin(tmp_path, capsys):
             name = "echo"
             commands = ["echo"]
             def handle(text, actor):
-                return f"echo: {text} (from {actor})"
+                return {"text": f"echo: {text} (from {actor})"}
         """
         },
     )
-    with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
+    with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
         exit_code = main(["echo this"])
     captured = capsys.readouterr()
     assert "[echo]" in captured.out
@@ -38,17 +38,17 @@ def test_main_fan_out_multiple_matches(tmp_path, capsys):
             name = "alpha"
             commands = ["summarize"]
             def handle(text, actor):
-                return "alpha summary"
+                return {"text": "alpha summary"}
         """,
             "beta.py": """
             name = "beta"
             commands = ["summarize"]
             def handle(text, actor):
-                return "beta summary"
+                return {"text": "beta summary"}
         """,
         },
     )
-    with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
+    with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
         exit_code = main(["summarize my day"])
     captured = capsys.readouterr()
     assert "[alpha]" in captured.out
@@ -66,11 +66,11 @@ def test_main_no_match(tmp_path, capsys):
             name = "echo"
             commands = ["echo"]
             def handle(text, actor):
-                return "ok"
+                return {"text": "ok"}
         """
         },
     )
-    with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
+    with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
         exit_code = main(["unknown command"])
     captured = capsys.readouterr()
     assert "I don't know how to do that yet." in captured.out
@@ -85,11 +85,11 @@ def test_main_custom_actor(tmp_path, capsys):
             name = "echo"
             commands = ["echo"]
             def handle(text, actor):
-                return f"echo: {text} (from {actor})"
+                return {"text": f"echo: {text} (from {actor})"}
         """
         },
     )
-    with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
+    with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
         exit_code = main(["--actor", "michelle", "echo this"])
     captured = capsys.readouterr()
     assert "from michelle" in captured.out
@@ -111,11 +111,11 @@ def test_main_partial_failure(tmp_path, capsys):
             name = "beta"
             commands = ["test"]
             def handle(text, actor):
-                return "beta worked"
+                return {"text": "beta worked"}
         """,
         },
     )
-    with patch("sandy.cli._get_plugin_dir", return_value=plugin_dir):
+    with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
         exit_code = main(["test"])
     captured = capsys.readouterr()
     assert "alpha plugin failed" in captured.err
@@ -138,7 +138,7 @@ def test_main_all_matched_plugins_fail(tmp_path, capsys):
         """
         },
     )
-    with patch("sandy.cli._get_plugin_dir", return_value=str(tmp_path)):
+    with patch("sandy.pipeline._default_plugin_dir", return_value=str(tmp_path)):
         exit_code = main(["boom"])
     captured = capsys.readouterr()
     assert "boom plugin failed" in captured.err

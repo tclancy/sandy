@@ -55,33 +55,40 @@ def _get_recent_releases(sp: spotipy.Spotify, artist_id: str, since: datetime) -
     return releases
 
 
-def handle(text: str, actor: str) -> str:
+def handle(text: str, actor: str) -> dict:
     try:
         sp = _get_spotify_client()
     except Exception as e:
-        return f"Spotify auth failed: {e}"
+        return {"text": f"Spotify auth failed: {e}"}
 
     since = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
     artists = _get_followed_artists(sp)
 
     if not artists:
-        return "You don't follow any artists on Spotify."
+        return {"text": "You don't follow any artists on Spotify."}
 
-    lines = [f"New releases from artists you follow (last {LOOKBACK_DAYS} days):", ""]
+    lines = []
+    links = []
     found = 0
 
     for artist in artists:
         for album in _get_recent_releases(sp, artist["id"], since):
             album_type = album["album_type"].capitalize()
             url = album["external_urls"].get("spotify", "")
-            entry = (
-                f"- {artist['name']} \u2014 {album['name']}"
-                f" ({album_type}, {album['release_date']}) {url}"
+            label = (
+                f"{artist['name']} \u2014 {album['name']} ({album_type}, {album['release_date']})"
             )
-            lines.append(entry)
+            lines.append(f"- {label} {url}")
+            if url:
+                links.append({"label": label, "url": url})
             found += 1
 
     if found == 0:
-        return f"No new releases from artists you follow in the last {LOOKBACK_DAYS} days."
+        no_releases = f"No new releases from artists you follow in the last {LOOKBACK_DAYS} days."
+        return {"text": no_releases}
 
-    return "\n".join(lines)
+    return {
+        "title": f"New releases from artists you follow (last {LOOKBACK_DAYS} days):",
+        "text": "\n".join(lines),
+        "links": links,
+    }

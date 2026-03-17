@@ -1,18 +1,33 @@
 import argparse
-import os
 import sys
 
-from sandy.config import apply_env, load_config
-from sandy.loader import load_plugins
-from sandy.matcher import find_matches
+from sandy.pipeline import run_pipeline
 
 
-def _get_plugin_dir() -> str:
-    """Return the path to the built-in plugins directory."""
-    return os.path.join(os.path.dirname(__file__), "plugins")
+def _format_text(plugin_name: str, response: dict) -> str:
+    """Format a plugin response dict as plain text for the CLI."""
+    lines = [f"[{plugin_name}]"]
+    if "title" in response:
+        lines.append(response["title"])
+    if "text" in response:
+        lines.append(response["text"])
+    if "links" in response:
+        for link in response["links"]:
+            lines.append(f"  {link['label']}: {link['url']}")
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Handle `sandy serve` before argparse (avoids subparser/positional conflict)
+    if argv and argv[0] == "serve":
+        from sandy.daemon import serve
+
+        serve()
+        return 0
+
     parser = argparse.ArgumentParser(description="Route text commands to plugins.")
     parser.add_argument("text", nargs="?", help="The command text to process")
     parser.add_argument("--actor", default="tom", help="Who is sending the command (default: tom)")
@@ -22,30 +37,21 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_usage(file=sys.stderr)
         return 1
 
-    config = load_config()
-    apply_env(config)
+    results, errors = run_pipeline(args.text, args.actor)
 
-    plugin_dir = _get_plugin_dir()
-    plugins = load_plugins(plugin_dir, config)
-    matches = find_matches(args.text, plugins)
+    for error in errors:
+        print(error, file=sys.stderr)
 
-    if not matches:
+    if not results and not errors:
         print("I don't know how to do that yet.")
         return 1
 
-    successes = 0
-    for i, match in enumerate(matches):
+    for i, (plugin_name, response) in enumerate(results):
         if i > 0:
-            print()  # blank line between plugin outputs
-        try:
-            result = match.handle(args.text, args.actor)
-            print(f"[{match.name}]")
-            print(result)
-            successes += 1
-        except Exception as e:
-            print(f"{match.name} plugin failed: {e}", file=sys.stderr)
+            print()
+        print(_format_text(plugin_name, response))
 
-    return 0 if successes > 0 else 1
+    return 0 if results else 1
 
 
 def cli():

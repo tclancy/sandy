@@ -134,9 +134,10 @@ def test_handle_returns_book_and_url(monkeypatch):
 
     monkeypatch.setattr(hardcover, "_graphql", fake_graphql)
     result = hardcover.handle("library book", "tom")
-    assert "Great Gatsby" in result
-    assert "Dover" in result
-    assert "https://" in result
+    assert "Great Gatsby" in result["text"]
+    links = result.get("links", [])
+    assert any("Dover" in link.get("label", "") for link in links)
+    assert any("https://" in link.get("url", "") for link in links)
 
 
 def test_handle_no_candidates(monkeypatch):
@@ -149,4 +150,4 @@ def test_handle_no_candidates(monkeypatch):
 
     monkeypatch.setattr(hardcover, "_graphql", fake_graphql)
     result = hardcover.handle("library book", "tom")
-    assert "No books found" in result
+    assert "No books found" in result["text"]

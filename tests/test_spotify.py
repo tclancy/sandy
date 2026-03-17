@@ -29,14 +29,14 @@ def test_spotify_commands():
 def test_handle_auth_failure():
     with patch.object(spotify, "_get_spotify_client", side_effect=Exception("no credentials")):
         result = spotify.handle("find me new music", "tom")
-    assert "auth failed" in result.lower()
+    assert "auth failed" in result["text"].lower()
 
 
 def test_handle_no_followed_artists():
     with patch.object(spotify, "_get_spotify_client"):
         with patch.object(spotify, "_get_followed_artists", return_value=[]):
             result = spotify.handle("find me new music", "tom")
-    assert "don't follow" in result.lower()
+    assert "don't follow" in result["text"].lower()
 
 
 def test_handle_no_recent_releases():
@@ -45,7 +45,7 @@ def test_handle_no_recent_releases():
         with patch.object(spotify, "_get_followed_artists", return_value=artists):
             with patch.object(spotify, "_get_recent_releases", return_value=[]):
                 result = spotify.handle("find me new music", "tom")
-    assert "no new releases" in result.lower()
+    assert "no new releases" in result["text"].lower()
 
 
 def test_handle_returns_formatted_releases():
@@ -62,10 +62,11 @@ def test_handle_returns_formatted_releases():
             with patch.object(spotify, "_get_recent_releases", side_effect=fake_recent_releases):
                 result = spotify.handle("find me new music", "tom")
 
-    assert "Slift" in result
-    assert "Ilion" in result
-    assert "https://open.spotify.com/album/slift" in result
-    assert "Kikagaku Moyo" not in result
+    text = result["text"]
+    assert "Slift" in text
+    assert "Ilion" in text
+    assert "https://open.spotify.com/album/slift" in text
+    assert "Kikagaku Moyo" not in text
 
 
 def test_parse_release_date_full():
