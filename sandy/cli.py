@@ -5,22 +5,37 @@ from sandy.pipeline import run_pipeline
 from sandy.progress import make_reporter
 
 
-def _format_text(plugin_name: str, response) -> str:
-    """Format a plugin response as plain text for the CLI.
+def _format_title(value: str) -> list[str]:
+    return [value]
 
-    Handles both legacy string responses and the standard dict response format.
+
+def _format_text(value: str) -> list[str]:
+    return [value]
+
+
+def _format_links(value: list[dict]) -> list[str]:
+    return [f"  {link['label']}: {link['url']}" for link in value]
+
+
+_FIELD_FORMATTERS: dict[str, object] = {
+    "title": _format_title,
+    "text": _format_text,
+    "links": _format_links,
+}
+
+
+def _render_response(plugin_name: str, response: dict) -> str:
+    """Format a plugin response dict as plain text for the CLI.
+
+    Each key in the response is dispatched to a ``_format_{key}`` function
+    via ``_FIELD_FORMATTERS``. Unknown keys are silently skipped, so new
+    field types only require adding a formatter — no edits to this function.
     """
     lines = [f"[{plugin_name}]"]
-    if isinstance(response, str):
-        lines.append(response)
-        return "\n".join(lines)
-    if "title" in response:
-        lines.append(response["title"])
-    if "text" in response:
-        lines.append(response["text"])
-    if "links" in response:
-        for link in response["links"]:
-            lines.append(f"  {link['label']}: {link['url']}")
+    for key, value in response.items():
+        formatter = _FIELD_FORMATTERS.get(key)
+        if formatter:
+            lines.extend(formatter(value))
     return "\n".join(lines)
 
 
@@ -60,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     for i, (plugin_name, response) in enumerate(results):
         if i > 0:
             print()
-        print(_format_text(plugin_name, response))
+        print(_render_response(plugin_name, response))
 
     return 0 if results else 1
 

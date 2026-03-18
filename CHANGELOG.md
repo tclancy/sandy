@@ -1,5 +1,15 @@
 # Sandy Changelog
 
+## 2026-03-17
+
+- Replace `_format_text` if-chain with `_FIELD_FORMATTERS` dynamic dispatch registry — new response field types require only a new `_format_{key}` function and registry entry, no edits to the renderer; outer function renamed to `_render_response` (issue #16, PR #17)
+- Add plugin progress reporting system (`sandy/progress.py`, `sandy/pipeline.py`)
+- Plugins can opt in to progress callbacks via `handle(text, actor, progress=None)` — backward compatible
+- `CliProgressReporter` writes per-plugin status to stderr, overwriting the same line; stdout stays clean
+- CLI refactored to delegate to `run_pipeline()` with progress factory
+- `spotify` plugin updated to report per-artist progress during API calls
+- 16 new tests; 115 total passing
+
 ## 2026-03-16
 
 - Add TOML configuration file support (`sandy/config.py`); reads `~/.config/sandy/sandy.toml`
