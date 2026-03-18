@@ -2,6 +2,7 @@ import argparse
 import sys
 
 from sandy.pipeline import run_pipeline
+from sandy.progress import make_reporter
 
 
 def _format_title(value: str) -> list[str]:
@@ -58,7 +59,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_usage(file=sys.stderr)
         return 1
 
-    results, errors = run_pipeline(args.text, args.actor)
+    results, errors = run_pipeline(
+        args.text,
+        args.actor,
+        progress_factory=make_reporter,
+    )
 
     for error in errors:
         print(error, file=sys.stderr)
