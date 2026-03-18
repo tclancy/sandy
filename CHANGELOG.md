@@ -1,5 +1,11 @@
 # Sandy Changelog
 
+## 2026-03-18
+
+- Resolved merge conflicts on `claude/plugin-feedback-8` (PR #15) by rebasing onto main
+- Merged daemon mode (PR #14) changes with progress reporting changes: cli.py uses `progress_factory`, pipeline.py adds `_accepts_progress` + progress_factory parameter, spotify.py keeps dict format + adds progress calls
+- 132 tests passing, 83% coverage
+
 ## 2026-03-17
 
 - Replace `_format_text` if-chain with `_FIELD_FORMATTERS` dynamic dispatch registry — new response field types require only a new `_format_{key}` function and registry entry, no edits to the renderer; outer function renamed to `_render_response` (issue #16, PR #17)
