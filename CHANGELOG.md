@@ -23,3 +23,7 @@
 - Add `sandy.toml.example` and `docs/plugins/config.md`
 - Add Real Men of Genius plugin: `sandy "tell me about a real man"` plays a random mp3
 - Add Hardcover library suggestion plugin: `sandy "suggest a library book"` picks from In Dover × Want to Read
+
+## 2026-03-19
+- Add sports schedule plugin: returns next game (within 14 days) for Red Sox, Patriots, Celtics, Bruins, Everton; ESPN API for US sports, football-data.org for Everton (issue #6, PR #23)
+- Extract printer to sandy/printer.py; add pdf_url output field to CLI formatter so any plugin can trigger printing by returning pdf_url; simplify cryptics plugin (issue #18, PR #24)
