@@ -48,6 +48,14 @@ active = yes
 HARDCOVER_API_KEY = "your-hardcover-api-key-here"
 
 
+# ---- Sports Plugin ----
+[sports]
+active = yes
+
+# Register free at https://www.football-data.org/ to get a key for Premier League (Everton)
+FOOTBALL_DATA_API_KEY = "your-key-here"
+
+
 # ---- Daemon Configuration ----
 # Controls which transports are active when running `sandy serve`
 [daemon]
