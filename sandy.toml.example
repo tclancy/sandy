@@ -52,6 +52,7 @@ HARDCOVER_API_KEY = "your-hardcover-api-key-here"
 # Controls which transports are active when running `sandy serve`
 [daemon]
 transports = ["slack"]
+log_level = "INFO"  # DEBUG, INFO, WARNING, ERROR
 
 
 # ---- Slack Transport ----

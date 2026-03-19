@@ -5,6 +5,7 @@ description = "CLI tool that routes text commands to plugins"
 requires-python = ">=3.13"
 dependencies = [
     "requests>=2.32.5",
+    "aiohttp>=3.9.0",
     "slack-bolt>=1.27.0",
     "spotipy>=2.24.0",
 ]

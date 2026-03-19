@@ -1,6 +1,5 @@
 """Tests for the real_men plugin."""
 
-import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,13 +19,6 @@ _SAMPLE_HTML = """
 def _mock_page_response():
     resp = MagicMock()
     resp.text = _SAMPLE_HTML
-    resp.raise_for_status = MagicMock()
-    return resp
-
-
-def _mock_mp3_response(content=b"fake-mp3-data"):
-    resp = MagicMock()
-    resp.content = content
     resp.raise_for_status = MagicMock()
     return resp
 
@@ -68,66 +60,23 @@ def test_get_mp3_urls_empty_page():
 
 
 # ---------------------------------------------------------------------------
-# _play_mp3
-# ---------------------------------------------------------------------------
-
-
-def test_play_mp3_downloads_and_plays(tmp_path):
-    with (
-        patch("requests.get", return_value=_mock_mp3_response()),
-        patch("subprocess.run") as mock_run,
-        patch("tempfile.NamedTemporaryFile") as mock_tmp,
-        patch("os.unlink") as mock_unlink,
-    ):
-        # Make NamedTemporaryFile work as context manager with a fake path
-        fake_file = MagicMock()
-        fake_file.__enter__ = MagicMock(return_value=fake_file)
-        fake_file.__exit__ = MagicMock(return_value=False)
-        fake_file.name = "/tmp/fake.mp3"
-        mock_tmp.return_value = fake_file
-
-        real_men._play_mp3("https://example.com/test.mp3")
-
-        mock_run.assert_called_once_with(["afplay", "/tmp/fake.mp3"], check=True)
-        mock_unlink.assert_called_once_with("/tmp/fake.mp3")
-
-
-def test_play_mp3_cleans_up_on_error():
-    with (
-        patch("requests.get", return_value=_mock_mp3_response()),
-        patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "afplay")),
-        patch("tempfile.NamedTemporaryFile") as mock_tmp,
-        patch("os.unlink") as mock_unlink,
-    ):
-        fake_file = MagicMock()
-        fake_file.__enter__ = MagicMock(return_value=fake_file)
-        fake_file.__exit__ = MagicMock(return_value=False)
-        fake_file.name = "/tmp/fake.mp3"
-        mock_tmp.return_value = fake_file
-
-        with pytest.raises(subprocess.CalledProcessError):
-            real_men._play_mp3("https://example.com/test.mp3")
-
-        # Cleanup still ran
-        mock_unlink.assert_called_once_with("/tmp/fake.mp3")
-
-
-# ---------------------------------------------------------------------------
 # handle
 # ---------------------------------------------------------------------------
 
 
-def test_handle_returns_title(monkeypatch):
+def test_handle_returns_response_with_audio_url(monkeypatch):
     monkeypatch.setattr(
         real_men,
         "_get_mp3_urls",
         lambda: ["https://allowe.com/audio/BudLite/Mr%20Amazing%20Guy.mp3"],
     )
-    monkeypatch.setattr(real_men, "_play_mp3", lambda url: None)
 
     result = real_men.handle("tell me about a real man", "tom")
     assert "Amazing Guy" in result["text"]
     assert "Real Men of Genius" in result["text"]
+    assert result["audio_url"] == "https://allowe.com/audio/BudLite/Mr%20Amazing%20Guy.mp3"
+    assert len(result["links"]) == 1
+    assert result["links"][0]["label"] == "Listen"
 
 
 def test_handle_raises_when_no_tracks(monkeypatch):

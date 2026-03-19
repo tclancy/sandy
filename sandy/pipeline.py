@@ -1,6 +1,7 @@
 """Core pipeline: match text against plugins, run handlers, collect results."""
 
 import inspect
+import logging
 import os
 from typing import Callable
 
@@ -8,6 +9,8 @@ from sandy.config import apply_env, load_config
 from sandy.loader import load_plugins
 from sandy.matcher import find_matches
 from sandy.progress import ProgressFn
+
+logger = logging.getLogger(__name__)
 
 
 def _default_plugin_dir() -> str:
@@ -58,6 +61,7 @@ def run_pipeline(
         plugins = load_plugins(plugin_dir, config)
 
     matches = find_matches(text, plugins)
+    logger.info("Matched %d plugin(s) for '%s': %s", len(matches), text, [m.name for m in matches])
 
     results = []
     errors = []
@@ -67,12 +71,19 @@ def run_pipeline(
             reporter = progress_factory(match.name)
 
         try:
+            logger.debug("Calling %s.handle(text='%s', actor='%s')", match.name, text, actor)
             if reporter is not None and _accepts_progress(match):
                 response = match.handle(text, actor, progress=reporter)
             else:
                 response = match.handle(text, actor)
+            logger.debug(
+                "Plugin '%s' returned: keys=%s",
+                match.name,
+                list(response.keys()) if isinstance(response, dict) else type(response),
+            )
             results.append((match.name, response))
         except Exception as e:
+            logger.error("Plugin '%s' failed: %s", match.name, e, exc_info=True)
             errors.append(f"{match.name} plugin failed: {e}")
         finally:
             if reporter is not None and hasattr(reporter, "clear"):

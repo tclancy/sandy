@@ -1,14 +1,12 @@
 """Real Men of Genius plugin.
 
 Scrapes allowe.com for Bud Light Real Men of Genius mp3 links,
-picks one at random, and plays it locally via afplay (macOS).
+picks one at random, and returns the title and audio URL.
+CLI auto-plays locally; remote transports render it as a link.
 """
 
-import os
 import random
 import re
-import subprocess
-import tempfile
 
 import requests
 
@@ -28,19 +26,6 @@ def _get_mp3_urls() -> list[str]:
     return [f"{_BASE_URL}{path}" for path in paths]
 
 
-def _play_mp3(url: str) -> None:
-    """Download *url* to a temp file and play it with afplay."""
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-        f.write(response.content)
-        tmp_path = f.name
-    try:
-        subprocess.run(["afplay", tmp_path], check=True)
-    finally:
-        os.unlink(tmp_path)
-
-
 def handle(text: str, actor: str) -> dict:
     urls = _get_mp3_urls()
     if not urls:
@@ -49,5 +34,8 @@ def handle(text: str, actor: str) -> dict:
     # Decode the filename for a readable title
     filename = url.split("/")[-1]
     title = requests.utils.unquote(filename).removesuffix(".mp3")
-    _play_mp3(url)
-    return {"text": f"Real Men of Genius presents: {title}"}
+    return {
+        "text": f"Real Men of Genius presents: {title}",
+        "audio_url": url,
+        "links": [{"label": "Listen", "url": url}],
+    }

@@ -1,5 +1,10 @@
 import argparse
+import os
+import subprocess
 import sys
+import tempfile
+
+import requests
 
 from sandy.pipeline import run_pipeline
 from sandy.progress import make_reporter
@@ -17,10 +22,28 @@ def _format_links(value: list[dict]) -> list[str]:
     return [f"  {link['label']}: {link['url']}" for link in value]
 
 
+def _format_audio(url: str) -> list[str]:
+    """Download and play an audio URL locally via afplay (macOS)."""
+    try:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            f.write(resp.content)
+            tmp_path = f.name
+        try:
+            subprocess.run(["afplay", tmp_path], check=True)
+        finally:
+            os.unlink(tmp_path)
+    except Exception:
+        return [f"  (could not play audio: {url})"]
+    return []
+
+
 _FIELD_FORMATTERS: dict[str, object] = {
     "title": _format_title,
     "text": _format_text,
     "links": _format_links,
+    "audio_url": _format_audio,
 }
 
 

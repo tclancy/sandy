@@ -1,6 +1,14 @@
 import textwrap
 from unittest.mock import patch
-from sandy.cli import _format_links, _format_text, _format_title, _render_response, cli, main
+from sandy.cli import (
+    _format_audio,
+    _format_links,
+    _format_text,
+    _format_title,
+    _render_response,
+    cli,
+    main,
+)
 
 
 # --- field formatter unit tests ---
@@ -12,6 +20,39 @@ def test_format_title_returns_value_in_list():
 
 def test_format_text_returns_value_in_list():
     assert _format_text("Hello world") == ["Hello world"]
+
+
+def test_format_audio_plays_and_returns_empty(tmp_path):
+    with (
+        patch("sandy.cli.requests.get") as mock_get,
+        patch("sandy.cli.subprocess.run") as mock_run,
+    ):
+        resp = mock_get.return_value
+        resp.content = b"fake-mp3"
+        resp.raise_for_status = lambda: None
+        result = _format_audio("https://example.com/test.mp3")
+    assert result == []
+    mock_run.assert_called_once()
+
+
+def test_format_audio_returns_fallback_on_error():
+    with patch("sandy.cli.requests.get", side_effect=Exception("network error")):
+        result = _format_audio("https://example.com/test.mp3")
+    assert len(result) == 1
+    assert "could not play audio" in result[0]
+
+
+def test_render_response_audio_url():
+    """audio_url is handled by the formatter (playback mocked)."""
+    with (
+        patch("sandy.cli.requests.get") as mock_get,
+        patch("sandy.cli.subprocess.run"),
+    ):
+        mock_get.return_value.content = b"fake"
+        mock_get.return_value.raise_for_status = lambda: None
+        out = _render_response("real_men", {"text": "Genius", "audio_url": "http://x.com/a.mp3"})
+    assert "[real_men]" in out
+    assert "Genius" in out
 
 
 def test_format_links_formats_each_link():
