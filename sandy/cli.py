@@ -7,6 +7,7 @@ import tempfile
 import requests
 
 from sandy.pipeline import run_pipeline
+from sandy.printer import print_pdf
 from sandy.progress import make_reporter
 
 
@@ -39,11 +40,19 @@ def _format_audio(url: str) -> list[str]:
     return []
 
 
+def _format_pdf_url(url: str) -> list[str]:
+    """Download a PDF from *url* and send it to the local printer."""
+    if print_pdf(url):
+        return []
+    return [f"  (could not print PDF: {url})"]
+
+
 _FIELD_FORMATTERS: dict[str, object] = {
     "title": _format_title,
     "text": _format_text,
     "links": _format_links,
     "audio_url": _format_audio,
+    "pdf_url": _format_pdf_url,
 }
 
 

@@ -1,8 +1,5 @@
-import os
 import random
 import re
-import subprocess
-import tempfile
 
 import requests
 
@@ -68,32 +65,6 @@ SOURCES = [
 ]
 
 
-# --- Printing ---
-
-
-def _print_pdf(pdf_url: str) -> None:
-    """Download a PDF and send it to the printer.
-
-    Reads printer name from SANDY_PRINTER env var.
-    Cleans up the temp file and any .ps sidecar lpr sometimes leaves behind.
-    """
-    printer = os.environ.get("SANDY_PRINTER", "Brother_MFC_L2750DW_series")
-    response = requests.get(pdf_url, timeout=30)
-    response.raise_for_status()
-
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-        f.write(response.content)
-        tmp_path = f.name
-
-    try:
-        subprocess.run(["lpr", "-P", printer, tmp_path], check=True)
-    finally:
-        os.unlink(tmp_path)
-        ps_path = tmp_path.replace(".pdf", ".ps")
-        if os.path.exists(ps_path):
-            os.unlink(ps_path)
-
-
 def handle(text: str, actor: str) -> dict:
     source_name, fetcher = random.choice(SOURCES)
     try:
@@ -101,12 +72,8 @@ def handle(text: str, actor: str) -> dict:
     except Exception as e:
         return {"text": f"Couldn't fetch a crossword from {source_name}: {e}"}
 
-    try:
-        _print_pdf(pdf_url)
-    except Exception as e:
-        return {
-            "text": f"Got a puzzle from {source_name} but printing failed: {e}",
-            "links": [{"label": f"{source_name} puzzle", "url": puzzle_page}],
-        }
-
-    return {"text": f"Printing your crossword from {source_name}. Enjoy!"}
+    return {
+        "text": f"Sending your crossword from {source_name} to the printer.",
+        "pdf_url": pdf_url,
+        "links": [{"label": f"View puzzle online ({source_name})", "url": puzzle_page}],
+    }
