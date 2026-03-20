@@ -65,6 +65,27 @@ def test_get_token_missing(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# _author_last_name
+# ---------------------------------------------------------------------------
+
+
+def test_author_last_name_first_last():
+    assert hardcover._author_last_name("John Vaillant") == "Vaillant"
+
+
+def test_author_last_name_last_first():
+    assert hardcover._author_last_name("Vaillant, John") == "Vaillant"
+
+
+def test_author_last_name_single_word():
+    assert hardcover._author_last_name("Voltaire") == "Voltaire"
+
+
+def test_author_last_name_strips_whitespace():
+    assert hardcover._author_last_name("  Harper Lee  ") == "Lee"
+
+
+# ---------------------------------------------------------------------------
 # _build_search_url
 # ---------------------------------------------------------------------------
 
@@ -73,6 +94,23 @@ def test_build_search_url_strips_stop_words():
     url = hardcover._build_search_url("The Great Gatsby")
     assert "Great+Gatsby" in url
     assert "The" not in url.split("?q=")[1]
+
+
+def test_build_search_url_includes_author_last_name():
+    url = hardcover._build_search_url("The Tiger", "John Vaillant")
+    assert "Vaillant" in url
+    assert "Tiger" in url
+
+
+def test_build_search_url_author_last_comma_format():
+    url = hardcover._build_search_url("Infinite Jest", "Wallace, David Foster")
+    assert "Wallace" in url
+    assert "Jest" in url
+
+
+def test_build_search_url_no_author_omits_unknown():
+    url = hardcover._build_search_url("Some Book", "Unknown")
+    assert "Unknown" not in url
 
 
 def test_build_search_url_keeps_all_words_if_all_stop():
