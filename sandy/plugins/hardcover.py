@@ -115,11 +115,25 @@ def _fetch_in_dover(token: str) -> list[dict]:
     return _parse_books(lists[0]["list_books"], "book")
 
 
-def _build_search_url(title: str) -> str:
+def _author_last_name(author: str) -> str:
+    """Extract the last name from 'First Last' or 'Last, First' format."""
+    author = author.strip()
+    if "," in author:
+        return author.split(",")[0].strip()
+    parts = author.split()
+    return parts[-1] if parts else author
+
+
+def _build_search_url(title: str, author: str = "") -> str:
+    """Build a Koha search URL combining stop-word-stripped title and author last name."""
     words = title.split()
     filtered = [w for w in words if w.lower() not in _STOP_WORDS]
-    clean = " ".join(filtered) if filtered else title
-    return f"{_KOHA_BASE}?q={quote_plus(clean)}{_KOHA_LIMITS}"
+    clean_title = " ".join(filtered) if filtered else title
+    if author and author != "Unknown":
+        query = f"{clean_title} {_author_last_name(author)}"
+    else:
+        query = clean_title
+    return f"{_KOHA_BASE}?q={quote_plus(query)}{_KOHA_LIMITS}"
 
 
 def handle(text: str, actor: str) -> dict:
@@ -137,7 +151,7 @@ def handle(text: str, actor: str) -> dict:
         return {"text": no_books_msg}
 
     book = random.choice(candidates)
-    url = _build_search_url(book["title"])
+    url = _build_search_url(book["title"], book["author"])
     return {
         "text": f"{book['title']} by {book['author']}",
         "links": [{"label": "Reserve at Dover Library", "url": url}],
