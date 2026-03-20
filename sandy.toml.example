@@ -56,6 +56,17 @@ active = yes
 FOOTBALL_DATA_API_KEY = "your-key-here"
 
 
+# ---- Dispatch Plugin ----
+# Read-only window into the Dispatch automation system. No API keys needed.
+# By default reads from ~/Documents/notes/tclancy/Dispatch/ and
+# ~/Documents/work/metaframework/. Override if your paths differ.
+[dispatch]
+active = yes
+
+# DISPATCH_OBSIDIAN_DIR = "/path/to/notes/Dispatch"
+# DISPATCH_METAFRAMEWORK_DIR = "/path/to/metaframework"
+
+
 # ---- Daemon Configuration ----
 # Controls which transports are active when running `sandy serve`
 [daemon]
