@@ -1,5 +1,6 @@
 """Tests for the Sandy progress reporting module."""
 
+import asyncio
 import io
 
 from sandy.progress import CliProgressReporter, make_reporter
@@ -45,3 +46,33 @@ def test_reporter_overwrites_with_carriage_return():
 def test_make_reporter_returns_cli_reporter():
     r = make_reporter("myplug")
     assert isinstance(r, CliProgressReporter)
+
+
+def test_queue_progress_reporter_sends_message():
+    """QueueProgressReporter puts formatted messages on the queue."""
+    from sandy.progress import QueueProgressReporter
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        q = asyncio.Queue()
+        reporter = QueueProgressReporter("spotify", q, loop)
+        reporter("Loading artists…")
+        # Give the event loop a chance to process the call_soon_threadsafe
+        await asyncio.sleep(0)
+        msg = q.get_nowait()
+        assert msg == "[spotify] Loading artists…"
+
+    asyncio.run(run())
+
+
+def test_queue_progress_reporter_clear_is_noop():
+    """clear() on QueueProgressReporter doesn't raise."""
+    from sandy.progress import QueueProgressReporter
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        q = asyncio.Queue()
+        reporter = QueueProgressReporter("test", q, loop)
+        reporter.clear()  # should not raise
+
+    asyncio.run(run())
