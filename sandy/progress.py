@@ -23,6 +23,7 @@ remains clean for piping.  Daemon transports may pass their own reporter or
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from typing import Callable
 
@@ -59,6 +60,30 @@ class CliProgressReporter:
             self._file.write("\r" + " " * self._PAD + "\r")
             self._file.flush()
             self._active = False
+
+
+class QueueProgressReporter:
+    """Thread-safe progress reporter for daemon transports.
+
+    Pushes messages onto an asyncio.Queue via call_soon_threadsafe so it
+    can be called from a worker thread while the event loop drains messages.
+    """
+
+    def __init__(
+        self,
+        plugin_name: str,
+        queue: asyncio.Queue[str | None],
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        self._plugin_name = plugin_name
+        self._queue = queue
+        self._loop = loop
+
+    def __call__(self, message: str) -> None:
+        self._loop.call_soon_threadsafe(self._queue.put_nowait, f"[{self._plugin_name}] {message}")
+
+    def clear(self) -> None:
+        pass  # Daemon signals termination with a None sentinel; no-op here
 
 
 def make_reporter(plugin_name: str) -> CliProgressReporter:
