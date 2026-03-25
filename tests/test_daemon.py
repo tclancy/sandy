@@ -110,8 +110,9 @@ def test_callback_no_match_sends_fallback(tmp_path):
 
         for plugin_name, response in results:
             await reply_fn(plugin_name, response)
-        for error in errors:
-            await reply_fn("error", {"text": error})
+        for plugin_name, error_msg in errors:
+            friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
+            await reply_fn("error", {"text": friendly})
         if not results and not errors:
             await reply_fn("sandy", {"text": "Sorry, I'm not sure how to do that."})
 

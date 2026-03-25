@@ -97,8 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         progress_factory=make_reporter,
     )
 
-    for error in errors:
-        print(error, file=sys.stderr)
+    for plugin_name, error_msg in errors:
+        print(f"{plugin_name} plugin failed: {error_msg}", file=sys.stderr)
 
     if not results and not errors:
         print("I don't know how to do that yet.")

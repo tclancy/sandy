@@ -89,7 +89,9 @@ def test_run_pipeline_plugin_error():
     results, errors = run_pipeline("boom", "tom", plugins=[plugin])
     assert results == []
     assert len(errors) == 1
-    assert "kaboom" in errors[0]
+    plugin_name, error_msg = errors[0]
+    assert plugin_name == "boom"
+    assert "kaboom" in error_msg
 
 
 def test_run_pipeline_partial_failure():
@@ -99,7 +101,9 @@ def test_run_pipeline_partial_failure():
     assert len(results) == 1
     assert results[0][0] == "good"
     assert len(errors) == 1
-    assert "oops" in errors[0]
+    plugin_name, error_msg = errors[0]
+    assert plugin_name == "bad"
+    assert "oops" in error_msg
 
 
 # ---------------------------------------------------------------------------
