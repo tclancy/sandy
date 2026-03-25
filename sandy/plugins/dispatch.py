@@ -160,11 +160,11 @@ _DISPATCH: dict[str, str] = {
 
 
 def handle(text: str, actor: str) -> dict:
-    import sys
-
     cmd = text.lower().strip()
     fn_name = _DISPATCH.get(cmd)
     if fn_name is None:
         return {"text": f"Unknown dispatch command: {text!r}"}
-    module = sys.modules[__name__]
-    return getattr(module, fn_name)()
+    # globals() always refers to this module's namespace, regardless of how the
+    # module was loaded. sys.modules[__name__] fails when the plugin loader
+    # registers modules under a path-derived name that isn't in sys.modules.
+    return globals()[fn_name]()

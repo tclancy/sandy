@@ -43,7 +43,7 @@ class Daemon:
 
     async def handle_message(
         self, text: str, actor: str, progress_factory=None
-    ) -> tuple[list[tuple[str, dict]], list[str]]:
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str]]]:
         """Run the pipeline in a thread so sync plugins don't block the event loop."""
         logger.debug("Routing message to pipeline: text='%s', actor='%s'", text, actor)
         results, errors = await asyncio.to_thread(
@@ -86,9 +86,10 @@ class Daemon:
         for plugin_name, response in results:
             logger.debug("Dispatching reply for '%s' back to transport", plugin_name)
             await reply_fn(plugin_name, response)
-        for error in errors:
-            logger.debug("Dispatching error reply: %s", error)
-            await reply_fn("error", {"text": error})
+        for plugin_name, error_msg in errors:
+            logger.debug("Dispatching error reply for '%s': %s", plugin_name, error_msg)
+            friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
+            await reply_fn("error", {"text": friendly})
         if not results and not errors:
             await reply_fn("sandy", {"text": "Sorry, I'm not sure how to do that."})
 

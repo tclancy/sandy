@@ -33,7 +33,7 @@ def run_pipeline(
     config: dict | None = None,
     plugins: list | None = None,
     progress_factory: Callable[[str], ProgressFn | None] | None = None,
-) -> tuple[list[tuple[str, object]], list[str]]:
+) -> tuple[list[tuple[str, object]], list[tuple[str, str]]]:
     """Run the Sandy pipeline: match text, call handlers, collect results.
 
     Args:
@@ -49,7 +49,7 @@ def run_pipeline(
 
     Returns:
         (results, errors) where results is a list of (plugin_name, response)
-        and errors is a list of error message strings.
+        and errors is a list of (plugin_name, error_message) tuples.
     """
     if config is None:
         config = load_config()
@@ -84,7 +84,7 @@ def run_pipeline(
             results.append((match.name, response))
         except Exception as e:
             logger.error("Plugin '%s' failed: %s", match.name, e, exc_info=True)
-            errors.append(f"{match.name} plugin failed: {e}")
+            errors.append((match.name, str(e)))
         finally:
             if reporter is not None and hasattr(reporter, "clear"):
                 reporter.clear()
