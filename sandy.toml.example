@@ -20,9 +20,27 @@
 # SANDY_PRINTER = "Brother_MFC_L2750DW_series"
 
 
-# ---- Spotify Plugin ----
-[spotify]
+# ---- Music Discovery Plugin ----
+# Replaces the Spotify new-releases plugin with a Last.fm-powered discovery flow.
+# Fetches Tom's top artists from Last.fm, finds similar artists, and populates
+# a Spotify playlist with tracks he likely hasn't heard.
+[music_discovery]
 active = yes
+
+LASTFM_API_KEY        = "your-lastfm-api-key-here"
+LASTFM_API_SECRET     = "your-lastfm-api-secret-here"
+LASTFM_USERNAME       = "your-lastfm-username-here"
+
+SPOTIPY_CLIENT_ID     = "your-client-id-here"
+SPOTIPY_CLIENT_SECRET = "your-client-secret-here"
+SPOTIPY_REDIRECT_URI  = "http://127.0.0.1:8888/callback"
+SPOTIFY_PLAYLIST_ID   = "your-playlist-id-here"
+
+
+# ---- Spotify Plugin ----
+# Disabled in favour of music_discovery above.
+[spotify]
+active = no
 
 SPOTIPY_CLIENT_ID     = "your-client-id-here"
 SPOTIPY_CLIENT_SECRET = "your-client-secret-here"
