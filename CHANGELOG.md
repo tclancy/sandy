@@ -1,5 +1,13 @@
 # Sandy Changelog
 
+## 2026-03-25
+
+- Add `cast_to_tv` plugin — "cast to tv \<url\>", "cast this \<url\>", "stop casting" (PR #31, closes #7)
+- MIME type detection from URL extension; defaults to video/mp4
+- Configurable target device (CAST_DEVICE_NAME) and discovery timeout (CAST_TIMEOUT)
+- Add pychromecast>=14.0 as project dependency
+- 22 new tests (all pychromecast calls mocked); 215 total tests, 83% coverage
+
 ## 2026-03-18
 
 - Resolved merge conflicts on `claude/plugin-feedback-8` (PR #15) by rebasing onto main
