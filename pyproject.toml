@@ -9,6 +9,7 @@ dependencies = [
     "slack-bolt>=1.27.0",
     "spotipy>=2.24.0",
     "pylast>=7.0.2",
+    "pychromecast>=14.0.10",
 ]
 
 [tool.pytest.ini_options]
