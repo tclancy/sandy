@@ -3,6 +3,20 @@
 
 ## 2026-03-25
 
+- Add `youtube_tv` plugin — "watch ESPN", "tune to CNN", "put on NBC Sports" tunes Google TV via ADB deeplinks (PR #37, closes #32)
+- Hardcoded channel code table (~30 channels: sports, news, network, entertainment, kids)
+- Config: YOUTUBE_TV_ADB_HOST (required), YOUTUBE_TV_ADB_PORT, YOUTUBE_TV_ADB_PATH
+- 32 new tests; 273 total, 83% coverage
+
+## 2026-03-25
+
+- Fix #34: dispatch plugin `sys.modules[__name__]` KeyError — all "status"/"check"/"inbox" commands now work; root cause was dynamic loader not registering modules in sys.modules
+- Fix #35: plugin errors now return friendly "I am terribly sorry, X just does not want to behave!" to Slack users; technical details still logged + shown on CLI stderr
+- Feat #33: new `health` built-in command — lists all active plugins and their commands (PR #36)
+- 241 tests, 82% coverage
+
+## 2026-03-25
+
 - Add `cast_to_tv` plugin — "cast to tv \<url\>", "cast this \<url\>", "stop casting" (PR #31, closes #7)
 - MIME type detection from URL extension; defaults to video/mp4
 - Configurable target device (CAST_DEVICE_NAME) and discovery timeout (CAST_TIMEOUT)
