@@ -4,9 +4,10 @@
 
 FROM python:3.13-slim
 
-# Install system deps for pychromecast (zeroconf) and adb
+# Install system deps for pychromecast (zeroconf), adb, and network printing
 RUN apt-get update && apt-get install -y --no-install-recommends \
     adb \
+    cups-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
