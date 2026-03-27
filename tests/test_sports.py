@@ -17,6 +17,12 @@ def _past_iso(days=2):
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _recent_iso(hours=2):
+    """Return an ISO timestamp N hours ago (within today's results window)."""
+    dt = datetime.now(timezone.utc) - timedelta(hours=hours)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _too_far_iso(days=20):
     dt = datetime.now(timezone.utc) + timedelta(days=days)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -27,22 +33,42 @@ def _make_espn_event(
     name: str = "Red Sox at Yankees",
     status: str = "Scheduled",
     venue: str = "Fenway",
+    competitors: list | None = None,
 ):
+    comp = {"venue": {"fullName": venue}}
+    if competitors is not None:
+        comp["competitors"] = competitors
     return {
         "date": date,
         "name": name,
         "status": {"type": {"description": status}},
-        "competitions": [{"venue": {"fullName": venue}}],
+        "competitions": [comp],
     }
 
 
-def _make_football_data_match(date: str, home: str = "Everton FC", away: str = "Arsenal FC"):
+def _make_competitors(home_abbr="BOS", home_score="5", away_abbr="NYY", away_score="3"):
+    return [
+        {"homeAway": "home", "team": {"abbreviation": home_abbr}, "score": home_score},
+        {"homeAway": "away", "team": {"abbreviation": away_abbr}, "score": away_score},
+    ]
+
+
+def _make_football_data_match(
+    date: str,
+    home: str = "Everton FC",
+    away: str = "Arsenal FC",
+    status: str = "SCHEDULED",
+    home_score=None,
+    away_score=None,
+):
     return {
         "utcDate": date,
         "homeTeam": {"name": home},
         "awayTeam": {"name": away},
         "competition": {"name": "Premier League"},
         "venue": "Goodison Park",
+        "status": status,
+        "score": {"fullTime": {"home": home_score, "away": away_score}},
     }
 
 
@@ -57,6 +83,7 @@ def test_commands():
     assert "sports" in sports.commands
     assert "next game" in sports.commands
     assert "schedule" in sports.commands
+    assert "scores" in sports.commands
 
 
 # ---- _fetch_espn_schedule ----
@@ -123,6 +150,72 @@ def test_parse_espn_next_game_includes_venue():
     assert game["venue"] == "Fenway Park"
 
 
+# ---- _extract_espn_score ----
+
+
+def test_extract_espn_score_returns_score():
+    competitors = _make_competitors("BOS", "5", "NYY", "3")
+    result = sports._extract_espn_score(competitors)
+    assert "BOS" in result
+    assert "NYY" in result
+    assert "5" in result
+    assert "3" in result
+
+
+def test_extract_espn_score_empty_when_no_scores():
+    competitors = [
+        {"homeAway": "home", "team": {"abbreviation": "BOS"}, "score": ""},
+        {"homeAway": "away", "team": {"abbreviation": "NYY"}, "score": ""},
+    ]
+    result = sports._extract_espn_score(competitors)
+    assert result == ""
+
+
+def test_extract_espn_score_empty_when_too_few_competitors():
+    result = sports._extract_espn_score([])
+    assert result == ""
+
+
+# ---- _parse_espn_today_results ----
+
+
+def test_parse_espn_today_results_returns_final_game():
+    competitors = _make_competitors("BOS", "5", "NYY", "3")
+    events = [_make_espn_event(_recent_iso(hours=3), status="Final", competitors=competitors)]
+    results = sports._parse_espn_today_results(events, "Red Sox")
+    assert len(results) == 1
+    assert results[0]["status"] == "Final"
+    assert results[0]["team"] == "Red Sox"
+    assert "BOS" in results[0]["score"]
+
+
+def test_parse_espn_today_results_returns_in_progress():
+    competitors = _make_competitors("BOS", "2", "NYY", "1")
+    events = [_make_espn_event(_recent_iso(hours=1), status="In Progress", competitors=competitors)]
+    results = sports._parse_espn_today_results(events, "Red Sox")
+    assert len(results) == 1
+    assert results[0]["status"] == "In Progress"
+
+
+def test_parse_espn_today_results_skips_future_games():
+    events = [_make_espn_event(_future_iso(hours=2), status="Scheduled")]
+    results = sports._parse_espn_today_results(events, "Red Sox")
+    assert results == []
+
+
+def test_parse_espn_today_results_skips_old_games():
+    events = [_make_espn_event(_past_iso(days=2), status="Final")]
+    results = sports._parse_espn_today_results(events, "Red Sox")
+    assert results == []
+
+
+def test_parse_espn_today_results_skips_scheduled_recent():
+    # A game scheduled to start soon (within 24h) but not yet started
+    events = [_make_espn_event(_recent_iso(hours=0), status="Scheduled")]
+    results = sports._parse_espn_today_results(events, "Red Sox")
+    assert results == []
+
+
 # ---- _fetch_football_data_next_game ----
 
 
@@ -161,31 +254,64 @@ def test_fetch_football_data_includes_venue():
     assert game["venue"] == "Goodison Park"
 
 
+# ---- _fetch_football_data_today_results ----
+
+
+def test_fetch_football_data_today_results_finished():
+    payload = {
+        "matches": [
+            _make_football_data_match(
+                _recent_iso(hours=2),
+                status="FINISHED",
+                home_score=2,
+                away_score=1,
+            )
+        ]
+    }
+    with patch("sandy.plugins.sports.requests.get") as mock_get:
+        mock_get.return_value.json.return_value = payload
+        mock_get.return_value.raise_for_status.return_value = None
+        results = sports._fetch_football_data_today_results("fake-key")
+    assert len(results) == 1
+    assert results[0]["status"] == "Final"
+    assert "2" in results[0]["score"]
+
+
+def test_fetch_football_data_today_results_in_play():
+    payload = {
+        "matches": [
+            _make_football_data_match(
+                _recent_iso(hours=1),
+                status="IN_PLAY",
+                home_score=1,
+                away_score=0,
+            )
+        ]
+    }
+    with patch("sandy.plugins.sports.requests.get") as mock_get:
+        mock_get.return_value.json.return_value = payload
+        mock_get.return_value.raise_for_status.return_value = None
+        results = sports._fetch_football_data_today_results("fake-key")
+    assert len(results) == 1
+    assert results[0]["status"] == "In Progress"
+
+
+def test_fetch_football_data_today_results_skips_scheduled():
+    payload = {"matches": [_make_football_data_match(_future_iso(hours=3), status="SCHEDULED")]}
+    with patch("sandy.plugins.sports.requests.get") as mock_get:
+        mock_get.return_value.json.return_value = payload
+        mock_get.return_value.raise_for_status.return_value = None
+        results = sports._fetch_football_data_today_results("fake-key")
+    assert results == []
+
+
+def test_fetch_football_data_today_results_returns_empty_on_error():
+    with patch("sandy.plugins.sports.requests.get", side_effect=Exception("network down")):
+        results = sports._fetch_football_data_today_results("fake-key")
+    assert results == []
+
+
 # ---- handle ----
-
-
-def _make_espn_side_effect(games_by_team: dict):
-    """Return a side_effect for _fetch_espn_schedule calls."""
-    call_order = [
-        ("baseball", "mlb", "2"),
-        ("football", "nfl", "17"),
-        ("basketball", "nba", "2"),
-        ("hockey", "nhl", "1"),
-    ]
-    responses = []
-    for sport, league, team_id in call_order:
-        labels = {
-            "baseball": "Red Sox",
-            "football": "Patriots",
-            "basketball": "Celtics",
-            "hockey": "Bruins",
-        }
-        label = labels[sport]
-        if label in games_by_team:
-            responses.append([_make_espn_event(games_by_team[label], name=f"{label} game")])
-        else:
-            responses.append([])
-    return responses
 
 
 def test_handle_returns_upcoming_games():
@@ -202,6 +328,7 @@ def test_handle_returns_upcoming_games():
                 "venue": "Goodison Park",
             },
         ),
+        patch.object(sports, "_fetch_football_data_today_results", return_value=[]),
         patch.dict("os.environ", {"FOOTBALL_DATA_API_KEY": "fake-key"}),
     ):
         result = sports.handle("sports", "tom")
@@ -211,10 +338,32 @@ def test_handle_returns_upcoming_games():
     assert "Everton" in result["text"]
 
 
+def test_handle_shows_today_section_when_games_played():
+    espn_events = [
+        _make_espn_event(
+            _recent_iso(hours=3),
+            name="Celtics at Knicks",
+            status="Final",
+            competitors=_make_competitors("BOS", "108", "NYK", "115"),
+        )
+    ]
+    with (
+        patch.object(sports, "_fetch_espn_schedule", return_value=espn_events),
+        patch.object(sports, "_fetch_football_data_next_game", return_value=None),
+        patch.object(sports, "_fetch_football_data_today_results", return_value=[]),
+        patch.dict("os.environ", {"FOOTBALL_DATA_API_KEY": "fake-key"}),
+    ):
+        result = sports.handle("sports", "tom")
+
+    assert "Today" in result["text"]
+    assert "Final" in result["text"]
+
+
 def test_handle_no_games():
     with (
         patch.object(sports, "_fetch_espn_schedule", return_value=[]),
         patch.object(sports, "_fetch_football_data_next_game", return_value=None),
+        patch.object(sports, "_fetch_football_data_today_results", return_value=[]),
         patch.dict("os.environ", {"FOOTBALL_DATA_API_KEY": "fake-key"}),
     ):
         result = sports.handle("sports", "tom")
@@ -237,8 +386,30 @@ def test_handle_calls_progress():
     with (
         patch.object(sports, "_fetch_espn_schedule", return_value=[]),
         patch.object(sports, "_fetch_football_data_next_game", return_value=None),
+        patch.object(sports, "_fetch_football_data_today_results", return_value=[]),
         patch.dict("os.environ", {"FOOTBALL_DATA_API_KEY": "fake-key"}),
     ):
         sports.handle("sports", "tom", progress=progress_calls.append)
 
     assert len(progress_calls) == 5  # 4 ESPN teams + Everton
+
+
+def test_handle_separates_today_and_upcoming_sections():
+    """When there are both today's results and upcoming games, both sections appear."""
+    recent_game = _make_espn_event(
+        _recent_iso(hours=4),
+        name="Bruins vs Leafs",
+        status="Final",
+        competitors=_make_competitors("BOS", "3", "TOR", "2"),
+    )
+    future_game = _make_espn_event(_future_iso(days=3), name="Bruins at Rangers")
+    with (
+        patch.object(sports, "_fetch_espn_schedule", return_value=[recent_game, future_game]),
+        patch.object(sports, "_fetch_football_data_next_game", return_value=None),
+        patch.object(sports, "_fetch_football_data_today_results", return_value=[]),
+        patch.dict("os.environ", {"FOOTBALL_DATA_API_KEY": "fake-key"}),
+    ):
+        result = sports.handle("sports", "tom")
+
+    assert "Today" in result["text"]
+    assert "Upcoming" in result["text"]
