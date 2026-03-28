@@ -249,8 +249,7 @@ Sandy runs as a Docker container on the homelab, managed by Ansible in the
 [rpi](https://github.com/tclancy/rpi) repo:
 
 ```bash
-cd ../rpi/ansible
-ansible-playbook -i inventory/hosts playbook.yml --tags sandy
+./deploy.sh
 ```
 
 This pulls the latest `ghcr.io/tclancy/sandy` image and restarts the container.
