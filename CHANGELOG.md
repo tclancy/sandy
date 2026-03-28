@@ -1,6 +1,12 @@
 # Sandy Changelog
 
 
+## 2026-03-27
+
+- Fix #42: dispatch plugin broken on homelab — added `_remote_context()` detection; plugin re-enabled in Ansible template with graceful fallbacks when Mac files are unavailable
+- Rename `inbox`/`dispatch inbox` commands to `pm`/`dispatch pm` (PR #43)
+- Feat #40: sports plugin now shows today's results and live scores as a top section — reuses existing ESPN schedule data for US sports; separate date-filtered call for Everton via football-data.org; added `scores` command alias
+
 ## 2026-03-25
 
 - Add `youtube_tv` plugin — "watch ESPN", "tune to CNN", "put on NBC Sports" tunes Google TV via ADB deeplinks (PR #37, closes #32)
