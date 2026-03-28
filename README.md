@@ -243,6 +243,21 @@ Tests live in `tests/`. The `conftest.py` has shared fixtures. Coverage gate is 
 
 ---
 
+## Deploying to Homelab
+
+Sandy runs as a Docker container on the homelab, managed by Ansible in the
+[rpi](https://github.com/tclancy/rpi) repo:
+
+```bash
+cd ../rpi/ansible
+ansible-playbook -i inventory/hosts playbook.yml --tags sandy
+```
+
+This pulls the latest `ghcr.io/tclancy/sandy` image and restarts the container.
+Config files (`sandy.toml`, `.env`) are templated from the Ansible role.
+
+---
+
 ## Project Structure
 
 ```
