@@ -6,10 +6,14 @@ agents are launched.
 Commands:
   "dispatch status" / "status"  — current state from memory.md
   "dispatch check"  / "check"   — recent run activity and lock status
-  "dispatch inbox"  / "inbox"   — contents of PM Inbox.md
+  "dispatch pm"     / "pm"      — contents of PM Inbox.md
 
 The plugin reads files directly so it returns instantly, unlike the
 dispatch CLI modes that launch full Claude agent sessions.
+
+When Sandy is running remotely (e.g. homelab Docker container) and cannot
+reach the Mac's Dispatch files, each command returns a friendly explanation
+instead of the generic "I'm not sure how to do that" fallback.
 """
 
 from __future__ import annotations
@@ -22,10 +26,10 @@ name = "dispatch"
 commands = [
     "dispatch status",
     "dispatch check",
-    "dispatch inbox",
+    "dispatch pm",
     "status",
     "check",
-    "inbox",
+    "pm",
 ]
 
 # Default location — can be overridden by DISPATCH_OBSIDIAN_DIR env var
@@ -41,6 +45,17 @@ def _metaframework_dir() -> Path:
     return Path(os.environ.get("DISPATCH_METAFRAMEWORK_DIR", str(_DEFAULT_METAFRAMEWORK_DIR)))
 
 
+def _remote_context() -> bool:
+    """Return True if neither key Dispatch directory is reachable.
+
+    When Sandy is running on a remote host (e.g. homelab Docker container) the
+    Obsidian vault and metaframework checkout aren't mounted.  Rather than
+    returning raw path-not-found errors for every command, we detect this once
+    and return a friendly explanation.
+    """
+    return not _dispatch_dir().exists() and not _metaframework_dir().exists()
+
+
 # ---------------------------------------------------------------------------
 # status — summary from memory.md
 # ---------------------------------------------------------------------------
@@ -54,6 +69,15 @@ _STATUS_RE = re.compile(
 
 def _cmd_status() -> dict:
     """Read current status from Dispatch/memory.md."""
+    if _remote_context():
+        return {
+            "title": "Dispatch Status",
+            "text": (
+                "Sandy is running remotely and cannot reach Dispatch files on your Mac.\n"
+                "Check memory.md directly in Obsidian."
+            ),
+        }
+
     path = _dispatch_dir() / "memory.md"
     if not path.exists():
         return {"text": f"memory.md not found at {path}"}
@@ -81,6 +105,15 @@ def _cmd_status() -> dict:
 
 def _cmd_check() -> dict:
     """Show recent dispatch runs and lock status."""
+    if _remote_context():
+        return {
+            "title": "Dispatch Activity",
+            "text": (
+                "Sandy is running remotely and cannot reach Dispatch logs on your Mac.\n"
+                "Check the metaframework logs directory directly."
+            ),
+        }
+
     mf_dir = _metaframework_dir()
     logs_dir = mf_dir / "logs"
 
@@ -122,15 +155,24 @@ def _cmd_check() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# inbox — PM Inbox contents
+# pm — PM Inbox contents
 # ---------------------------------------------------------------------------
 
 # Strip YAML-style metadata blocks from the top
 _FRONTMATTER_RE = re.compile(r"^---\n.*?\n---\n", re.DOTALL)
 
 
-def _cmd_inbox() -> dict:
+def _cmd_pm() -> dict:
     """Show the contents of PM Inbox.md."""
+    if _remote_context():
+        return {
+            "title": "PM Inbox",
+            "text": (
+                "Sandy is running remotely and cannot reach PM Inbox.md on your Mac.\n"
+                "Open PM Inbox.md directly in Obsidian."
+            ),
+        }
+
     path = _dispatch_dir() / "PM Inbox.md"
     if not path.exists():
         return {"text": f"PM Inbox.md not found at {path}"}
@@ -154,8 +196,8 @@ _DISPATCH: dict[str, str] = {
     "status": "_cmd_status",
     "dispatch check": "_cmd_check",
     "check": "_cmd_check",
-    "dispatch inbox": "_cmd_inbox",
-    "inbox": "_cmd_inbox",
+    "dispatch pm": "_cmd_pm",
+    "pm": "_cmd_pm",
 }
 
 
