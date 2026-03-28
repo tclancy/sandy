@@ -76,10 +76,10 @@ FOOTBALL_DATA_API_KEY = "your-key-here"
 
 # ---- Dispatch Plugin ----
 # Read-only window into the Dispatch automation system. No API keys needed.
-# By default reads from ~/Documents/notes/tclancy/Dispatch/ and
-# ~/Documents/work/metaframework/. Override if your paths differ.
+# Disabled by default — only useful when Sandy runs on the same Mac as the
+# metaframework checkout and Obsidian vault. Set active = "yes" to enable.
 [dispatch]
-active = "yes"
+active = "no"
 
 # DISPATCH_OBSIDIAN_DIR = "/path/to/notes/Dispatch"
 # DISPATCH_METAFRAMEWORK_DIR = "/path/to/metaframework"

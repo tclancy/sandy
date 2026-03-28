@@ -1,6 +1,10 @@
 # Sandy Changelog
 
 
+## 2026-03-28
+
+- Fix #47: dispatch plugin disabled by default in sandy.toml.example — only useful when Sandy runs on the same Mac as metaframework; health plugin now respects `active = "no"` and skips disabled plugins (PR #48)
+
 ## 2026-03-27
 
 - Fix #41: printing from Slack did not work — root cause was Slack transport's format_response() silently ignoring pdf_url; daemon now calls print_pdf() before dispatching to transport, with failure message if printer unreachable (PR #46)
