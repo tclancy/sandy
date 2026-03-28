@@ -6,9 +6,9 @@
 #
 # Conventions:
 #   UPPERCASE keys = environment variables (secrets, tokens, API keys)
-#   lowercase keys = configuration values  (e.g. active = yes/no)
+#   lowercase keys = configuration values  (e.g. active = "yes"/"no")
 #
-# active = yes/no controls whether Sandy loads a plugin at all.
+# active = "yes"/"no" controls whether Sandy loads a plugin at all.
 # Active is case-insensitive: yes, YES, Yes all work.
 # If a plugin has no section here, it is active by default.
 
@@ -25,7 +25,7 @@
 # Fetches Tom's top artists from Last.fm, finds similar artists, and populates
 # a Spotify playlist with tracks he likely hasn't heard.
 [music_discovery]
-active = yes
+active = "yes"
 
 LASTFM_API_KEY        = "your-lastfm-api-key-here"
 LASTFM_API_SECRET     = "your-lastfm-api-secret-here"
@@ -40,7 +40,7 @@ SPOTIFY_PLAYLIST_ID   = "your-playlist-id-here"
 # ---- Spotify Plugin ----
 # Disabled in favour of music_discovery above.
 [spotify]
-active = no
+active = "no"
 
 SPOTIPY_CLIENT_ID     = "your-client-id-here"
 SPOTIPY_CLIENT_SECRET = "your-client-secret-here"
@@ -49,26 +49,26 @@ SPOTIPY_REDIRECT_URI  = "http://127.0.0.1:8888/callback"
 
 # ---- Cryptics Plugin ----
 [cryptics]
-active = yes
+active = "yes"
 
 # SANDY_PRINTER = "Brother_MFC_L2750DW_series"
 
 
 # ---- Real Men Plugin ----
 [real_men]
-active = yes
+active = "yes"
 
 
 # ---- Hardcover Plugin ----
 [hardcover]
-active = yes
+active = "yes"
 
 HARDCOVER_API_KEY = "your-hardcover-api-key-here"
 
 
 # ---- Sports Plugin ----
 [sports]
-active = yes
+active = "yes"
 
 # Register free at https://www.football-data.org/ to get a key for Premier League (Everton)
 FOOTBALL_DATA_API_KEY = "your-key-here"
@@ -79,7 +79,7 @@ FOOTBALL_DATA_API_KEY = "your-key-here"
 # By default reads from ~/Documents/notes/tclancy/Dispatch/ and
 # ~/Documents/work/metaframework/. Override if your paths differ.
 [dispatch]
-active = yes
+active = "yes"
 
 # DISPATCH_OBSIDIAN_DIR = "/path/to/notes/Dispatch"
 # DISPATCH_METAFRAMEWORK_DIR = "/path/to/metaframework"
