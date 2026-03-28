@@ -3,6 +3,7 @@
 
 ## 2026-03-27
 
+- Fix #41: printing from Slack did not work — root cause was Slack transport's format_response() silently ignoring pdf_url; daemon now calls print_pdf() before dispatching to transport, with failure message if printer unreachable (PR #46)
 - Fix #42: dispatch plugin broken on homelab — added `_remote_context()` detection; plugin re-enabled in Ansible template with graceful fallbacks when Mac files are unavailable
 - Rename `inbox`/`dispatch inbox` commands to `pm`/`dispatch pm` (PR #43)
 - Feat #40: sports plugin now shows today's results and live scores as a top section — reuses existing ESPN schedule data for US sports; separate date-filtered call for Everton via football-data.org; added `scores` command alias
