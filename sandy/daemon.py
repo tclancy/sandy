@@ -9,6 +9,7 @@ import sys
 from sandy.config import apply_env, load_config
 from sandy.loader import load_plugins
 from sandy.pipeline import run_pipeline
+from sandy.printer import print_pdf
 from sandy.progress import QueueProgressReporter
 from sandy.transport_loader import load_transports
 
@@ -85,6 +86,8 @@ class Daemon:
 
         for plugin_name, response in results:
             logger.debug("Dispatching reply for '%s' back to transport", plugin_name)
+            if "pdf_url" in response:
+                response = await self._handle_pdf_response(response)
             await reply_fn(plugin_name, response)
         for plugin_name, error_msg in errors:
             logger.debug("Dispatching error reply for '%s': %s", plugin_name, error_msg)
@@ -92,6 +95,22 @@ class Daemon:
             await reply_fn("error", {"text": friendly})
         if not results and not errors:
             await reply_fn("sandy", {"text": "Sorry, I'm not sure how to do that."})
+
+    async def _handle_pdf_response(self, response: dict) -> dict:
+        """Attempt to print a PDF and update the response text to reflect the outcome.
+
+        The pdf_url field is consumed here (server-side print) and is not
+        forwarded to the transport — transports don't know about printers.
+        """
+        pdf_url = response["pdf_url"]
+        success = await asyncio.to_thread(print_pdf, pdf_url)
+        response = {k: v for k, v in response.items() if k != "pdf_url"}
+        if not success:
+            original_text = response.get("text", "")
+            response["text"] = (
+                original_text.rstrip(".") + " — but the printer did not respond. Is it on?"
+            )
+        return response
 
     async def run(self):
         """Start all transports and run until interrupted."""

@@ -1,5 +1,6 @@
 import asyncio
 import textwrap
+from unittest.mock import patch
 from sandy.daemon import Daemon
 
 
@@ -117,5 +118,97 @@ def test_callback_no_match_sends_fallback(tmp_path):
             await reply_fn("sandy", {"text": "Sorry, I'm not sure how to do that."})
 
         assert replies == [("sandy", {"text": "Sorry, I'm not sure how to do that."})]
+
+    asyncio.run(run())
+
+
+# ── pdf_url handling ──────────────────────────────────────────────────────────
+
+
+def _make_pdf_plugin(tmp_path):
+    return _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "crossword.py": """
+            name = "crossword"
+            commands = ["crossword"]
+            def handle(text, actor):
+                return {
+                    "text": "Sending your crossword to the printer.",
+                    "pdf_url": "https://example.com/puzzle.pdf",
+                    "links": [{"label": "View online", "url": "https://example.com/puzzle"}],
+                }
+        """
+        },
+    )
+
+
+def test_daemon_calls_print_pdf_for_pdf_url(tmp_path):
+    """Daemon calls print_pdf() when a plugin response contains pdf_url."""
+    plugin_dir = _make_pdf_plugin(tmp_path)
+    daemon = Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    async def run():
+        replies = []
+
+        async def reply_fn(name, resp):
+            replies.append((name, resp))
+
+        with patch("sandy.daemon.print_pdf", return_value=True) as mock_print:
+            await daemon._handle_callback("crossword", "tom", reply_fn)
+
+        mock_print.assert_called_once_with("https://example.com/puzzle.pdf")
+        assert len(replies) == 1
+        _, resp = replies[0]
+        # pdf_url should not be forwarded to the transport
+        assert "pdf_url" not in resp
+        # text unchanged on success
+        assert resp["text"] == "Sending your crossword to the printer."
+        # links still forwarded
+        assert "links" in resp
+
+    asyncio.run(run())
+
+
+def test_daemon_updates_text_on_print_failure(tmp_path):
+    """Daemon appends a printer-failure note to the text when print_pdf() returns False."""
+    plugin_dir = _make_pdf_plugin(tmp_path)
+    daemon = Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    async def run():
+        replies = []
+
+        async def reply_fn(name, resp):
+            replies.append((name, resp))
+
+        with patch("sandy.daemon.print_pdf", return_value=False):
+            await daemon._handle_callback("crossword", "tom", reply_fn)
+
+        assert len(replies) == 1
+        _, resp = replies[0]
+        assert "pdf_url" not in resp
+        assert (
+            "printer did not respond" in resp["text"].lower() or "printer" in resp["text"].lower()
+        )
+
+    asyncio.run(run())
+
+
+def test_daemon_pdf_url_not_forwarded_to_transport(tmp_path):
+    """pdf_url is consumed by the daemon and never sent to the transport."""
+    plugin_dir = _make_pdf_plugin(tmp_path)
+    daemon = Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    async def run():
+        forwarded = {}
+
+        async def reply_fn(name, resp):
+            forwarded.update(resp)
+
+        with patch("sandy.daemon.print_pdf", return_value=True):
+            await daemon._handle_callback("crossword", "tom", reply_fn)
+
+        assert "pdf_url" not in forwarded
 
     asyncio.run(run())

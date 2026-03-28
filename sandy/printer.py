@@ -8,11 +8,14 @@ can be set in ``sandy.toml`` under the ``[printer]`` or global section.
 Run ``lpstat -p`` to list available printers.
 """
 
+import logging
 import os
 import subprocess
 import tempfile
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_PRINTER = "Brother_MFC_L2750DW_series"
 
@@ -47,6 +50,8 @@ def print_pdf(url: str, printer: str | None = None) -> bool:
             if os.path.exists(ps_path):
                 os.unlink(ps_path)
 
+        logger.info("Printed PDF from %s to printer '%s'", url, printer)
         return True
-    except Exception:
+    except Exception as exc:
+        logger.error("Print failed (printer='%s', url=%s): %s", printer, url, exc)
         return False
