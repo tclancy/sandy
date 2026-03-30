@@ -12,11 +12,13 @@ Data sources:
   - US sports: ESPN unofficial API (site.api.espn.com)
   - Soccer: football-data.org (requires FOOTBALL_DATA_API_KEY in env/config)
 
-Game times are converted to the local system timezone.
+Game times are converted to the requested timezone (IANA name), falling back
+to the local system timezone.
 """
 
 import os
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
@@ -36,6 +38,17 @@ _ESPN_TEAMS = [
 
 _ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports"
 
+
+def _to_tz(dt: datetime, tz: str | None) -> datetime:
+    """Convert *dt* to *tz* (IANA name), falling back to the system local tz."""
+    if tz:
+        try:
+            return dt.astimezone(ZoneInfo(tz))
+        except ZoneInfoNotFoundError:
+            pass
+    return dt.astimezone()
+
+
 # football-data.org Everton team ID (Premier League)
 _EVERTON_TEAM_ID = 62
 _FOOTBALL_DATA_BASE = "https://api.football-data.org/v4"
@@ -52,7 +65,7 @@ def _fetch_espn_schedule(sport: str, league: str, team_id: str) -> list[dict]:
         return []
 
 
-def _parse_espn_next_game(events: list[dict], label: str) -> dict | None:
+def _parse_espn_next_game(events: list[dict], label: str, tz: str | None = None) -> dict | None:
     """Find the next scheduled game from ESPN events within LOOKAHEAD_DAYS.
 
     Returns a normalised game dict, or None if no game is found soon enough.
@@ -79,7 +92,7 @@ def _parse_espn_next_game(events: list[dict], label: str) -> dict | None:
         competitions = event.get("competitions", [])
         venue = competitions[0].get("venue", {}).get("fullName", "") if competitions else ""
         name_str = event.get("name", label)
-        local_dt = game_dt.astimezone()
+        local_dt = _to_tz(game_dt, tz)
 
         return {
             "team": label,
@@ -151,7 +164,7 @@ def _parse_espn_today_results(events: list[dict], label: str) -> list[dict]:
     return results
 
 
-def _fetch_football_data_next_game(api_key: str) -> dict | None:
+def _fetch_football_data_next_game(api_key: str, tz: str | None = None) -> dict | None:
     """Return Everton's next upcoming PL match within LOOKAHEAD_DAYS, or None."""
     url = f"{_FOOTBALL_DATA_BASE}/teams/{_EVERTON_TEAM_ID}/matches"
     params = {"status": "SCHEDULED", "limit": 5}
@@ -181,7 +194,7 @@ def _fetch_football_data_next_game(api_key: str) -> dict | None:
         home = match.get("homeTeam", {}).get("name", "?")
         away = match.get("awayTeam", {}).get("name", "?")
         competition = match.get("competition", {}).get("name", "Premier League")
-        local_dt = game_dt.astimezone()
+        local_dt = _to_tz(game_dt, tz)
 
         return {
             "team": "Everton",
@@ -269,7 +282,7 @@ def _build_response(today_games: list[dict], upcoming_games: list[dict]) -> dict
     return {"title": "Sports Update", "text": "\n\n".join(sections)}
 
 
-def handle(text: str, actor: str, progress=None) -> dict:
+def handle(text: str, actor: str, progress=None, tz: str | None = None) -> dict:
     today_games: list[dict] = []
     upcoming_games: list[dict] = []
 
@@ -278,7 +291,7 @@ def handle(text: str, actor: str, progress=None) -> dict:
             progress(f"Checking {team['label']}…")
         events = _fetch_espn_schedule(team["sport"], team["league"], team["team_id"])
         today_games.extend(_parse_espn_today_results(events, team["label"]))
-        game = _parse_espn_next_game(events, team["label"])
+        game = _parse_espn_next_game(events, team["label"], tz)
         if game:
             upcoming_games.append(game)
 
@@ -288,7 +301,7 @@ def handle(text: str, actor: str, progress=None) -> dict:
         progress("Checking Everton…")
     if api_key:
         today_games.extend(_fetch_football_data_today_results(api_key))
-        game = _fetch_football_data_next_game(api_key)
+        game = _fetch_football_data_next_game(api_key, tz)
         if game:
             upcoming_games.append(game)
     else:

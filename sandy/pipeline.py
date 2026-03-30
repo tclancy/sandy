@@ -5,7 +5,7 @@ import logging
 import os
 from typing import Callable
 
-from sandy.config import apply_env, load_config
+from sandy.config import apply_env, get_timezone, load_config
 from sandy.loader import load_plugins
 from sandy.matcher import find_matches
 from sandy.progress import ProgressFn
@@ -26,6 +26,15 @@ def _accepts_progress(plugin) -> bool:
         return False
 
 
+def _accepts_tz(plugin) -> bool:
+    """Return True if the plugin's handle() accepts a ``tz`` parameter."""
+    try:
+        sig = inspect.signature(plugin.handle)
+        return "tz" in sig.parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def run_pipeline(
     text: str,
     actor: str,
@@ -33,6 +42,7 @@ def run_pipeline(
     config: dict | None = None,
     plugins: list | None = None,
     progress_factory: Callable[[str], ProgressFn | None] | None = None,
+    tz: str | None = None,
 ) -> tuple[list[tuple[str, object]], list[tuple[str, str]]]:
     """Run the Sandy pipeline: match text, call handlers, collect results.
 
@@ -46,6 +56,9 @@ def run_pipeline(
             a progress reporter (or None to suppress progress).  When provided,
             the reporter is passed to plugins whose ``handle()`` accepts a
             ``progress`` keyword argument.
+        tz: IANA timezone name for the requesting user (e.g. ``"America/New_York"``).
+            Falls back to ``config["sandy"]["timezone"]`` if not provided.
+            Passed to plugins whose ``handle()`` accepts a ``tz`` keyword argument.
 
     Returns:
         (results, errors) where results is a list of (plugin_name, response)
@@ -54,6 +67,9 @@ def run_pipeline(
     if config is None:
         config = load_config()
         apply_env(config)
+
+    # Resolve effective timezone: caller-supplied → config default → None (system TZ)
+    effective_tz = tz or get_timezone(config)
 
     if plugins is None:
         if plugin_dir is None:
@@ -71,11 +87,20 @@ def run_pipeline(
             reporter = progress_factory(match.name)
 
         try:
-            logger.debug("Calling %s.handle(text='%s', actor='%s')", match.name, text, actor)
+            kwargs: dict = {}
             if reporter is not None and _accepts_progress(match):
-                response = match.handle(text, actor, progress=reporter)
-            else:
-                response = match.handle(text, actor)
+                kwargs["progress"] = reporter
+            if effective_tz is not None and _accepts_tz(match):
+                kwargs["tz"] = effective_tz
+
+            logger.debug(
+                "Calling %s.handle(text='%s', actor='%s', kwargs=%s)",
+                match.name,
+                text,
+                actor,
+                list(kwargs.keys()),
+            )
+            response = match.handle(text, actor, **kwargs)
             logger.debug(
                 "Plugin '%s' returned: keys=%s",
                 match.name,

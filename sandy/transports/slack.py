@@ -86,6 +86,9 @@ async def listen(callback):
     app = AsyncApp(token=bot_token)
     logger.info("Slack app created, registering event handlers")
 
+    # Cache (display_name, tz) per Slack user ID to avoid extra API calls per message.
+    _user_info_cache: dict[str, tuple[str, str | None]] = {}
+
     @app.event("message")
     async def handle_message(event, say):
         logger.debug("Raw Slack event received: %s", event)
@@ -100,17 +103,27 @@ async def listen(callback):
             text = text.split(">", 1)[-1].strip()
             logger.debug("Stripped mention: '%s' -> '%s'", original, text)
 
-        actor = event.get("user", "unknown")
+        user_id = event.get("user", "unknown")
+        actor = user_id
         logger.info("Message from user=%s: '%s'", actor, text)
 
-        # Try to get display name for actor
-        try:
-            user_info = await app.client.users_info(user=actor)
-            display = user_info["user"]["profile"].get("display_name") or user_info["user"]["name"]
-            actor = display.lower()
-            logger.debug("Resolved actor display name: '%s'", actor)
-        except Exception as e:
-            logger.warning("Could not resolve display name for %s: %s", actor, e)
+        # Fetch display name and timezone from Slack (cached per user ID)
+        actor_tz: str | None = None
+        if user_id in _user_info_cache:
+            actor, actor_tz = _user_info_cache[user_id]
+            logger.debug("User info from cache: actor='%s', tz='%s'", actor, actor_tz)
+        else:
+            try:
+                user_info = await app.client.users_info(user=user_id)
+                display = (
+                    user_info["user"]["profile"].get("display_name") or user_info["user"]["name"]
+                )
+                actor = display.lower()
+                actor_tz = user_info["user"].get("tz")
+                _user_info_cache[user_id] = (actor, actor_tz)
+                logger.debug("Resolved user info: actor='%s', tz='%s'", actor, actor_tz)
+            except Exception as e:
+                logger.warning("Could not resolve user info for %s: %s", user_id, e)
 
         async def reply_fn(plugin_name, response):
             formatted = format_response(plugin_name, response)
@@ -118,7 +131,7 @@ async def listen(callback):
             await say(blocks=formatted["blocks"])
             logger.info("Reply sent for plugin '%s'", plugin_name)
 
-        await callback(text, actor, reply_fn)
+        await callback(text, actor, reply_fn, tz=actor_tz)
 
     logger.info("Starting Socket Mode handler")
     handler = AsyncSocketModeHandler(app, app_token)

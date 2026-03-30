@@ -413,3 +413,107 @@ def test_handle_separates_today_and_upcoming_sections():
 
     assert "Today" in result["text"]
     assert "Upcoming" in result["text"]
+
+
+# ---- _to_tz ----
+
+
+def test_to_tz_converts_to_valid_iana_timezone():
+    """A known IANA timezone name produces a tz-aware datetime in that zone."""
+    from datetime import timezone as dt_tz
+    from zoneinfo import ZoneInfo
+
+    utc_dt = datetime(2026, 7, 4, 17, 0, tzinfo=dt_tz.utc)  # noon ET (UTC-4 in summer)
+    result = sports._to_tz(utc_dt, "America/New_York")
+    assert result.tzinfo is not None
+    assert result.utcoffset() == ZoneInfo("America/New_York").utcoffset(utc_dt)
+    # 17:00 UTC = 13:00 ET (UTC-4 during DST)
+    assert result.hour == 13
+
+
+def test_to_tz_falls_back_to_local_on_invalid_tz():
+    """An unrecognised timezone string falls back to the system local timezone."""
+    from datetime import timezone as dt_tz
+
+    utc_dt = datetime(2026, 7, 4, 17, 0, tzinfo=dt_tz.utc)
+    result = sports._to_tz(utc_dt, "Not/A/Real/TZ")
+    # Should return a localised datetime without raising
+    assert result.tzinfo is not None
+
+
+def test_to_tz_with_none_returns_local():
+    """Passing tz=None falls back to the system local timezone."""
+    from datetime import timezone as dt_tz
+
+    utc_dt = datetime(2026, 7, 4, 17, 0, tzinfo=dt_tz.utc)
+    result = sports._to_tz(utc_dt, None)
+    assert result.tzinfo is not None
+
+
+# ---- timezone propagation in _parse_espn_next_game ----
+
+
+def test_parse_espn_next_game_uses_requested_timezone():
+    """_parse_espn_next_game formats dates in the requested timezone."""
+    from datetime import timezone as dt_tz
+
+    # Game at 17:00 UTC on a weekday in summer: 13:00 ET, 10:00 PT
+    game_utc = (datetime.now(dt_tz.utc) + timedelta(days=3)).replace(
+        hour=17, minute=0, second=0, microsecond=0
+    )
+    iso = game_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    events = [_make_espn_event(iso, name="Red Sox at Yankees")]
+
+    et_game = sports._parse_espn_next_game(events, "Red Sox", tz="America/New_York")
+    pt_game = sports._parse_espn_next_game(events, "Red Sox", tz="America/Los_Angeles")
+
+    assert et_game is not None
+    assert pt_game is not None
+    # The TZ abbreviation in the formatted string should differ
+    assert et_game["date"] != pt_game["date"]
+
+
+# ---- timezone propagation in handle ----
+
+
+def test_handle_passes_tz_to_espn_parser():
+    """handle() with tz= passes the timezone to _parse_espn_next_game."""
+    espn_events = [_make_espn_event(_future_iso(days=2), name="Red Sox at Yankees")]
+    captured = {}
+
+    def mock_parse(events, label, tz=None):
+        captured["tz"] = tz
+        return None
+
+    with (
+        patch.object(sports, "_fetch_espn_schedule", return_value=espn_events),
+        patch.object(sports, "_parse_espn_next_game", side_effect=mock_parse),
+        patch.object(sports, "_fetch_football_data_next_game", return_value=None),
+        patch.object(sports, "_fetch_football_data_today_results", return_value=[]),
+        patch.object(sports, "_parse_espn_today_results", return_value=[]),
+        patch.dict("os.environ", {"FOOTBALL_DATA_API_KEY": "fake-key"}),
+    ):
+        sports.handle("sports", "tom", tz="America/Chicago")
+
+    assert captured["tz"] == "America/Chicago"
+
+
+def test_handle_passes_tz_to_football_data():
+    """handle() with tz= passes the timezone to _fetch_football_data_next_game."""
+    captured = {}
+
+    def mock_fetch(api_key, tz=None):
+        captured["tz"] = tz
+        return None
+
+    with (
+        patch.object(sports, "_fetch_espn_schedule", return_value=[]),
+        patch.object(sports, "_parse_espn_today_results", return_value=[]),
+        patch.object(sports, "_parse_espn_next_game", return_value=None),
+        patch.object(sports, "_fetch_football_data_today_results", return_value=[]),
+        patch.object(sports, "_fetch_football_data_next_game", side_effect=mock_fetch),
+        patch.dict("os.environ", {"FOOTBALL_DATA_API_KEY": "fake-key"}),
+    ):
+        sports.handle("sports", "tom", tz="Europe/London")
+
+    assert captured["tz"] == "Europe/London"

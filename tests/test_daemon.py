@@ -212,3 +212,60 @@ def test_daemon_pdf_url_not_forwarded_to_transport(tmp_path):
         assert "pdf_url" not in forwarded
 
     asyncio.run(run())
+
+
+# ── timezone propagation ──────────────────────────────────────────────────────
+
+
+def test_handle_message_passes_tz_to_pipeline(tmp_path):
+    """handle_message forwards tz= to run_pipeline."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "tz_echo.py": """
+            name = "tz_echo"
+            commands = ["tz test"]
+            def handle(text, actor, tz=None):
+                return {"text": f"tz={tz}"}
+        """
+        },
+    )
+    daemon = Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    async def run():
+        results, errors = await daemon.handle_message("tz test", "tom", tz="America/New_York")
+        assert len(results) == 1
+        assert results[0][1]["text"] == "tz=America/New_York"
+
+    asyncio.run(run())
+
+
+def test_handle_callback_passes_tz(tmp_path):
+    """_handle_callback forwards tz= through to pipeline results."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "tz_echo.py": """
+            name = "tz_echo"
+            commands = ["tz test"]
+            def handle(text, actor, tz=None):
+                return {"text": f"tz={tz}"}
+        """
+        },
+    )
+    daemon = Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    async def run():
+        replies = []
+
+        async def reply_fn(name, resp):
+            replies.append((name, resp))
+
+        await daemon._handle_callback("tz test", "tom", reply_fn, tz="Pacific/Auckland")
+
+        assert len(replies) == 1
+        assert replies[0][1]["text"] == "tz=Pacific/Auckland"
+
+    asyncio.run(run())
