@@ -43,10 +43,10 @@ class Daemon:
         )
 
     async def handle_message(
-        self, text: str, actor: str, progress_factory=None
+        self, text: str, actor: str, progress_factory=None, tz: str | None = None
     ) -> tuple[list[tuple[str, dict]], list[tuple[str, str]]]:
         """Run the pipeline in a thread so sync plugins don't block the event loop."""
-        logger.debug("Routing message to pipeline: text='%s', actor='%s'", text, actor)
+        logger.debug("Routing message to pipeline: text='%s', actor='%s', tz='%s'", text, actor, tz)
         results, errors = await asyncio.to_thread(
             run_pipeline,
             text,
@@ -54,15 +54,16 @@ class Daemon:
             plugins=self.plugins,
             config=self.config,
             progress_factory=progress_factory,
+            tz=tz,
         )
         logger.info("Pipeline returned %d result(s), %d error(s)", len(results), len(errors))
         if errors:
             logger.warning("Pipeline errors: %s", errors)
         return results, errors
 
-    async def _handle_callback(self, text, actor, reply_fn):
+    async def _handle_callback(self, text, actor, reply_fn, tz: str | None = None):
         """Process an incoming message through the pipeline and send replies."""
-        logger.debug("Callback invoked: text='%s', actor='%s'", text, actor)
+        logger.debug("Callback invoked: text='%s', actor='%s', tz='%s'", text, actor, tz)
 
         loop = asyncio.get_running_loop()
         progress_queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -79,7 +80,9 @@ class Daemon:
 
         drain_task = asyncio.create_task(drain_progress())
         try:
-            results, errors = await self.handle_message(text, actor, progress_factory=make_progress)
+            results, errors = await self.handle_message(
+                text, actor, progress_factory=make_progress, tz=tz
+            )
         finally:
             await progress_queue.put(None)
             await drain_task

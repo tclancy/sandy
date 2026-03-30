@@ -55,7 +55,7 @@ def _get_recent_releases(sp: spotipy.Spotify, artist_id: str, since: datetime) -
     return releases
 
 
-def handle(text: str, actor: str, progress=None) -> dict:
+def handle(text: str, actor: str, progress=None, tz: str | None = None) -> dict:
     try:
         sp = _get_spotify_client()
     except Exception as e:

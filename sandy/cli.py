@@ -85,6 +85,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Route text commands to plugins.")
     parser.add_argument("text", nargs="?", help="The command text to process")
     parser.add_argument("--actor", default="tom", help="Who is sending the command (default: tom)")
+    parser.add_argument(
+        "--timezone",
+        "-z",
+        default=None,
+        metavar="TZ",
+        help="IANA timezone name for this request (e.g. America/New_York). "
+        "Overrides the config file default.",
+    )
     args = parser.parse_args(argv)
 
     if not args.text:
@@ -95,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         args.text,
         args.actor,
         progress_factory=make_reporter,
+        tz=args.timezone,
     )
 
     for plugin_name, error_msg in errors:

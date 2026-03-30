@@ -62,6 +62,26 @@ def apply_env(config: dict) -> None:
             os.environ.setdefault(key, str(value))
 
 
+def get_timezone(config: dict) -> str | None:
+    """Return the configured default timezone, or None if not set.
+
+    Reads ``timezone`` from the ``[sandy]`` section of the config file.
+    Example::
+
+        [sandy]
+        timezone = "America/New_York"
+
+    Returns the IANA timezone name (e.g. ``"America/New_York"``), or None
+    if no timezone is configured (callers fall back to the system timezone).
+    """
+    section = config.get("sandy", {})
+    if isinstance(section, dict):
+        tz = section.get("timezone")
+        if tz and isinstance(tz, str):
+            return tz.strip()
+    return None
+
+
 def is_active(config: dict, plugin_name: str) -> bool:
     """Return True if the plugin is active (or not mentioned in config).
 

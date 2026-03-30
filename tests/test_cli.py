@@ -259,3 +259,66 @@ def test_cli_keyboard_interrupt(capsys):
     captured = capsys.readouterr()
     assert "Wrapping up early today!" in captured.out
     assert exc_info.value.code == 0
+
+
+# --- timezone flag ---
+
+
+def test_main_timezone_flag_passed_to_pipeline(tmp_path, capsys):
+    """--timezone is forwarded to run_pipeline as the tz kwarg."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "tz_echo.py": """
+            name = "tz_echo"
+            commands = ["tz test"]
+            def handle(text, actor, tz=None):
+                return {"text": f"tz={tz}"}
+        """
+        },
+    )
+    with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
+        exit_code = main(["--timezone", "America/Chicago", "tz test"])
+    captured = capsys.readouterr()
+    assert "tz=America/Chicago" in captured.out
+    assert exit_code == 0
+
+
+def test_main_timezone_short_flag(tmp_path, capsys):
+    """Short flag -z is an alias for --timezone."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "tz_echo.py": """
+            name = "tz_echo"
+            commands = ["tz test"]
+            def handle(text, actor, tz=None):
+                return {"text": f"tz={tz}"}
+        """
+        },
+    )
+    with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
+        exit_code = main(["-z", "Europe/London", "tz test"])
+    captured = capsys.readouterr()
+    assert "tz=Europe/London" in captured.out
+    assert exit_code == 0
+
+
+def test_main_timezone_default_is_none(tmp_path, capsys):
+    """Without --timezone, tz defaults to None and pipeline uses config fallback."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "tz_echo.py": """
+            name = "tz_echo"
+            commands = ["tz test"]
+            def handle(text, actor, tz=None):
+                return {"text": f"tz={tz}"}
+        """
+        },
+    )
+    with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
+        exit_code = main(["tz test"])
+    captured = capsys.readouterr()
+    assert "tz=None" in captured.out
+    assert exit_code == 0
