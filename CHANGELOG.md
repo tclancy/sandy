@@ -1,6 +1,17 @@
 # Sandy Changelog
 
 
+## 2026-03-30
+
+- Feat #49/#50: timezone awareness end-to-end (PR #51)
+  - `--timezone`/`-z` CLI flag passes IANA tz name to pipeline
+  - `sports` plugin: `_to_tz()` helper, game times shown in requested tz; falls back to config `[sandy] timezone`, then system tz
+  - `spotify` plugin: opts in to tz pipeline (no display dates currently, ready for future)
+  - `daemon`: tz threaded through `handle_message()` and `_handle_callback()`
+  - Slack transport: fetches `user.tz` from `users.info` API (cached per user ID), Slack users automatically get times in their own timezone
+  - No new dependencies (stdlib `zoneinfo`, Python 3.13+)
+  - 11 new tests; 309 total, 85% coverage
+
 ## 2026-03-28
 
 - Fix #47: dispatch plugin disabled by default in sandy.toml.example — only useful when Sandy runs on the same Mac as metaframework; health plugin now respects `active = "no"` and skips disabled plugins (PR #48)
