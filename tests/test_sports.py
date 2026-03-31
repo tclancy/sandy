@@ -176,6 +176,28 @@ def test_extract_espn_score_empty_when_too_few_competitors():
     assert result == ""
 
 
+def test_extract_espn_score_handles_dict_score():
+    """ESPN sometimes returns score as a dict — extract displayValue."""
+    competitors = [
+        {
+            "homeAway": "home",
+            "team": {"abbreviation": "HOU"},
+            "score": {"value": 8.0, "displayValue": "8"},
+        },
+        {
+            "homeAway": "away",
+            "team": {"abbreviation": "BOS"},
+            "score": {"value": 1.0, "displayValue": "1"},
+        },
+    ]
+    result = sports._extract_espn_score(competitors)
+    assert "8" in result
+    assert "1" in result
+    assert "HOU" in result
+    assert "BOS" in result
+    assert "{'value'" not in result
+
+
 # ---- _parse_espn_today_results ----
 
 
