@@ -114,6 +114,11 @@ def _extract_espn_score(competitors: list[dict]) -> str:
         return ""
     hs = home.get("score", "")
     as_ = away.get("score", "")
+    # ESPN sometimes returns score as {"value": 1.0, "displayValue": "1"} instead of a plain string
+    if isinstance(hs, dict):
+        hs = hs.get("displayValue", "")
+    if isinstance(as_, dict):
+        as_ = as_.get("displayValue", "")
     if not hs or not as_:
         return ""
     ht = home.get("team", {}).get("abbreviation") or home.get("team", {}).get("displayName", "")
@@ -249,7 +254,7 @@ def _fetch_football_data_today_results(api_key: str) -> list[dict]:
 
 def _format_game(g: dict) -> str:
     """Format an upcoming game dict into a display line."""
-    line = f"**{g['team']}**: {g['game']}"
+    line = f"*{g['team']}*: {g['game']}"
     if g["date"]:
         line += f" — {g['date']}"
     if g["venue"]:
@@ -261,7 +266,7 @@ def _format_today_result(g: dict) -> str:
     """Format a today's result/live-score dict into a display line."""
     status = g["status"]
     score = g.get("score", "")
-    line = f"**{g['team']}** ({status}): {g['game']}"
+    line = f"*{g['team']}* ({status}): {g['game']}"
     if score:
         line += f" — {score}"
     return line
@@ -279,7 +284,7 @@ def _build_response(today_games: list[dict], upcoming_games: list[dict]) -> dict
         sections.append((header + "\n" + "\n".join(lines)).lstrip() if header else "\n".join(lines))
     if not sections:
         return {"text": f"No games today or in the next {LOOKAHEAD_DAYS} days."}
-    return {"title": "Sports Update", "text": "\n\n".join(sections)}
+    return {"title": "Hey there, sports fans!", "text": "\n\n".join(sections)}
 
 
 def handle(text: str, actor: str, progress=None, tz: str | None = None) -> dict:

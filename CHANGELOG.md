@@ -1,6 +1,11 @@
 # Sandy Changelog
 
 
+## 2026-03-31
+
+- Fix #54: sports plugin Slack display (PR #57) — single `*` for bold, ESPN dict score → displayValue, title → "Hey there, sports fans!"
+- Chore: add `.envrc.example` + `.envrc` to `.gitignore` (PR #56)
+
 ## 2026-03-30
 
 - Feat #49/#50: timezone awareness end-to-end (PR #51)
