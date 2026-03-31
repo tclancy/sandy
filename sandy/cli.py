@@ -42,9 +42,10 @@ def _format_audio(url: str) -> list[str]:
 
 def _format_pdf_url(url: str) -> list[str]:
     """Download a PDF from *url* and send it to the local printer."""
-    if print_pdf(url):
+    success, detail = print_pdf(url)
+    if success:
         return []
-    return [f"  (could not print PDF: {url})"]
+    return [f"  (could not print PDF: {url}" + (f" — {detail}" if detail else "") + ")"]
 
 
 _FIELD_FORMATTERS: dict[str, object] = {

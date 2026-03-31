@@ -16,8 +16,14 @@
 # ---- Global environment variables ----
 # These apply to all plugins.
 
-# Printer used by the cryptics plugin (run `lpstat -p` to find yours)
+# Printer used by the cryptics plugin.
+# Option 1 — CUPS queue name (run `lpstat -p` to find yours):
 # SANDY_PRINTER = "Brother_MFC_L2750DW_series"
+#
+# Option 2 — Direct IPP URI (recommended for Linux/homelab; bypasses CUPS
+# hostname/mDNS resolution). Find the printer's IP on your router, then:
+# SANDY_PRINTER = "ipp://192.168.1.50/ipp/print"
+# Most Brother printers expose /ipp/print on port 631 (default IPP port).
 
 
 # ---- Music Discovery Plugin ----
@@ -51,7 +57,8 @@ SPOTIPY_REDIRECT_URI  = "http://127.0.0.1:8888/callback"
 [cryptics]
 active = "yes"
 
-# SANDY_PRINTER = "Brother_MFC_L2750DW_series"
+# Printer override at plugin scope (overrides global SANDY_PRINTER above)
+# SANDY_PRINTER = "ipp://192.168.1.50/ipp/print"
 
 
 # ---- Real Men Plugin ----

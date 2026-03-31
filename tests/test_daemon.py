@@ -155,7 +155,7 @@ def test_daemon_calls_print_pdf_for_pdf_url(tmp_path):
         async def reply_fn(name, resp):
             replies.append((name, resp))
 
-        with patch("sandy.daemon.print_pdf", return_value=True) as mock_print:
+        with patch("sandy.daemon.print_pdf", return_value=(True, "")) as mock_print:
             await daemon._handle_callback("crossword", "tom", reply_fn)
 
         mock_print.assert_called_once_with("https://example.com/puzzle.pdf")
@@ -182,7 +182,9 @@ def test_daemon_updates_text_on_print_failure(tmp_path):
         async def reply_fn(name, resp):
             replies.append((name, resp))
 
-        with patch("sandy.daemon.print_pdf", return_value=False):
+        with patch(
+            "sandy.daemon.print_pdf", return_value=(False, "lpr: Error - printer not found")
+        ):
             await daemon._handle_callback("crossword", "tom", reply_fn)
 
         assert len(replies) == 1
@@ -206,7 +208,7 @@ def test_daemon_pdf_url_not_forwarded_to_transport(tmp_path):
         async def reply_fn(name, resp):
             forwarded.update(resp)
 
-        with patch("sandy.daemon.print_pdf", return_value=True):
+        with patch("sandy.daemon.print_pdf", return_value=(True, "")):
             await daemon._handle_callback("crossword", "tom", reply_fn)
 
         assert "pdf_url" not in forwarded
