@@ -3,6 +3,7 @@
 
 ## 2026-03-31
 
+- Fix #55: printer IPP URI support for Linux homelab (PR #58) — `SANDY_PRINTER = "ipp://ip/ipp/print"` bypasses CUPS mDNS; failure now includes stderr + lpstat diagnostics in Slack message
 - Fix #54: sports plugin Slack display (PR #57) — single `*` for bold, ESPN dict score → displayValue, title → "Hey there, sports fans!"
 - Chore: add `.envrc.example` + `.envrc` to `.gitignore` (PR #56)
 

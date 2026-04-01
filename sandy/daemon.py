@@ -106,13 +106,16 @@ class Daemon:
         forwarded to the transport — transports don't know about printers.
         """
         pdf_url = response["pdf_url"]
-        success = await asyncio.to_thread(print_pdf, pdf_url)
+        success, detail = await asyncio.to_thread(print_pdf, pdf_url)
         response = {k: v for k, v in response.items() if k != "pdf_url"}
         if not success:
             original_text = response.get("text", "")
-            response["text"] = (
-                original_text.rstrip(".") + " — but the printer did not respond. Is it on?"
+            suffix = (
+                f" — but printing failed: {detail}"
+                if detail
+                else " — but the printer did not respond. Is it on?"
             )
+            response["text"] = original_text.rstrip(".") + suffix
         return response
 
     async def run(self):
