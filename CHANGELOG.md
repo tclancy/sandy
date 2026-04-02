@@ -1,6 +1,10 @@
 # Sandy Changelog
 
 
+## 2026-04-02
+
+- Feat #59: IT Guy plugin (PR #60) — `itguy list`, `itguy deploy <svc>`, `itguy force <svc>` commands; graceful fallback when itguy not on PATH; 18 new tests
+
 ## 2026-03-31
 
 - Fix #55: printer IPP URI support for Linux homelab (PR #58) — `SANDY_PRINTER = "ipp://ip/ipp/print"` bypasses CUPS mDNS; failure now includes stderr + lpstat diagnostics in Slack message
