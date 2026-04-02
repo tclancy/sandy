@@ -1,0 +1,22 @@
+[Unit]
+Description=Sandy — personal assistant daemon
+After=network.target
+# Restart on crash; systemd rate-limits restarts automatically
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/sources/sandy
+# uv run handles the venv; PATH must include uv's install location
+Environment="PATH=/home/tom/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/tom/.local/bin/uv run sandy serve
+Restart=on-failure
+RestartSec=5
+
+# Log to systemd journal — readable via: journalctl --user -u sandy
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
