@@ -114,7 +114,7 @@ def test_handle_list(monkeypatch):
         itguy_plugin, "_run", lambda *args: {"title": "IT Guy", "text": " ".join(args)}
     )
     result = itguy_plugin.handle("itguy list", "tom")
-    assert result["text"] == "list"
+    assert result["text"] == "list --format slack"
 
 
 def test_handle_list_case_insensitive(monkeypatch):
@@ -122,7 +122,7 @@ def test_handle_list_case_insensitive(monkeypatch):
         itguy_plugin, "_run", lambda *args: {"title": "IT Guy", "text": " ".join(args)}
     )
     result = itguy_plugin.handle("ITGUY LIST", "tom")
-    assert result["text"] == "list"
+    assert result["text"] == "list --format slack"
 
 
 def test_handle_deploy_with_service(monkeypatch):
