@@ -45,7 +45,7 @@ class Daemon:
 
         self.plugin_dir = plugin_dir
         self.plugins = load_plugins(plugin_dir, config)
-        self._plugin_snapshot = _plugin_snapshot(plugin_dir)
+        self._plugin_mtimes = _plugin_snapshot(plugin_dir)
         logger.info(
             "Loaded %d content plugin(s): %s", len(self.plugins), [p.name for p in self.plugins]
         )
@@ -133,9 +133,12 @@ class Daemon:
     async def _watch_plugins(self) -> None:
         """Poll plugin directory every _RELOAD_INTERVAL seconds and reload on change.
 
-        Uses os.path.getmtime() (follows symlinks) so changes to symlinked plugin
+        Uses Path.stat().st_mtime (follows symlinks) so changes to symlinked plugin
         files are detected correctly — the mtime of the symlink target is compared.
         New files and deleted files both trigger a reload.
+
+        If load_plugins raises (e.g. a plugin file has a syntax error), the previous
+        plugin set is kept active and the watcher continues polling.
         """
         while True:
             await asyncio.sleep(_RELOAD_INTERVAL)
@@ -143,10 +146,15 @@ class Daemon:
                 current = _plugin_snapshot(self.plugin_dir)
             except OSError:
                 continue
-            if current != self._plugin_snapshot:
+            if current != self._plugin_mtimes:
                 logger.info("Plugin directory changed — reloading plugins")
-                self.plugins = load_plugins(self.plugin_dir, self.config)
-                self._plugin_snapshot = current
+                try:
+                    new_plugins = load_plugins(self.plugin_dir, self.config)
+                except Exception:
+                    logger.exception("Failed to reload plugins — keeping previous plugin set")
+                    continue
+                self.plugins = new_plugins
+                self._plugin_mtimes = current
                 logger.info(
                     "Reloaded %d plugin(s): %s",
                     len(self.plugins),

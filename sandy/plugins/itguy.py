@@ -67,6 +67,7 @@ def _wrap_code_block(output: dict) -> dict:
 
 
 def _handle_status(cmd: str) -> dict:
+    """Extract optional service name from the command and run itguy status."""
     service = cmd[len("itguy status") :].strip()
     if service:
         return _wrap_code_block(_run("status", service))
