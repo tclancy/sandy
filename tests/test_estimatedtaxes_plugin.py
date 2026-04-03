@@ -20,6 +20,7 @@ def test_name():
 def test_commands():
     assert "tax summary" in tax_plugin.commands
     assert "tax list" in tax_plugin.commands
+    assert "tax sync" in tax_plugin.commands
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +133,31 @@ def test_handle_tax_list(monkeypatch):
     assert result["text"] == "list"
 
 
+def test_handle_tax_sync(monkeypatch):
+    monkeypatch.setattr(
+        tax_plugin, "_run", lambda *args: {"title": "Taxes", "text": " ".join(args)}
+    )
+    result = tax_plugin.handle("tax sync", "tom")
+    assert result["text"] == "sync"
+
+
+def test_handle_tax_sync_success_output(monkeypatch):
+    monkeypatch.setattr(tax_plugin, "_available", lambda: True)
+    synced_msg = "Synced 2 new payment(s) (3 already existed)."
+    with patch("subprocess.run", return_value=_mock_run(stdout=synced_msg)):
+        result = tax_plugin._run("sync")
+    assert "Synced" in result["text"]
+    assert "2 new" in result["text"]
+
+
+def test_handle_tax_sync_missing_env_vars(monkeypatch):
+    monkeypatch.setattr(tax_plugin, "_available", lambda: True)
+    err = "Error: ATEAM_EMAIL and ATEAM_PASSWORD env vars are required."
+    with patch("subprocess.run", return_value=_mock_run(stdout=err, returncode=1)):
+        result = tax_plugin._run("sync")
+    assert "Error" in result["text"]
+
+
 def test_handle_unknown():
     result = tax_plugin.handle("tax file return", "tom")
     assert "Unknown" in result["text"]
@@ -165,4 +191,5 @@ def test_commands_match_via_substring():
 
     assert find_matches("tax summary", plugins)
     assert find_matches("tax list", plugins)
+    assert find_matches("tax sync", plugins)
     assert not find_matches("tax enter 1000", plugins)

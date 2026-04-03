@@ -1,13 +1,12 @@
-"""Sandy plugin: Estimated Taxes — tax summary via Slack.
-
-Read-only access to the estimatedtaxes CLI. Recording income stays as a
-direct CLI operation — this plugin is intentionally limited to queries.
+"""Sandy plugin: Estimated Taxes — tax queries and A*Team sync via Slack.
 
 Commands:
   "tax summary"   — current year income, estimated tax, and quarterly status
   "tax list"      — list all recorded income entries
+  "tax sync"      — pull paid invoices from A*Team into the local database
 
 Requires ``estimatedtaxes`` to be installed and on PATH.
+ATEAM_EMAIL and ATEAM_PASSWORD env vars must be set for the sync command.
 Returns a friendly error when not available (e.g. Sandy running remotely).
 """
 
@@ -17,7 +16,7 @@ import shutil
 import subprocess
 
 name = "estimatedtaxes"
-commands = ["tax summary", "tax list"]
+commands = ["tax summary", "tax list", "tax sync"]
 
 _TAX_CMD = "estimatedtaxes"
 
@@ -63,5 +62,8 @@ def handle(text: str, actor: str) -> dict:
 
     if cmd == "tax list":
         return _run("list")
+
+    if cmd == "tax sync":
+        return _run("sync")
 
     return {"title": "Taxes", "text": f"Unknown tax command: {text!r}"}
