@@ -1,5 +1,7 @@
 # Sandy Changelog
 
+## 2026-04-03
+- Feat: estimatedtaxes plugin `tax summary` now uses `--format slack` (PR #70) — returns Slack monospace code block with aligned columns instead of raw CLI text; 354 tests passing
 
 ## 2026-04-02
 

@@ -114,7 +114,7 @@ def test_handle_tax_summary(monkeypatch):
         tax_plugin, "_run", lambda *args: {"title": "Taxes", "text": " ".join(args)}
     )
     result = tax_plugin.handle("tax summary", "tom")
-    assert result["text"] == "summarize"
+    assert result["text"] == "summarize --format slack"
 
 
 def test_handle_tax_summary_case_insensitive(monkeypatch):
@@ -122,7 +122,7 @@ def test_handle_tax_summary_case_insensitive(monkeypatch):
         tax_plugin, "_run", lambda *args: {"title": "Taxes", "text": " ".join(args)}
     )
     result = tax_plugin.handle("TAX SUMMARY", "tom")
-    assert result["text"] == "summarize"
+    assert result["text"] == "summarize --format slack"
 
 
 def test_handle_tax_list(monkeypatch):
