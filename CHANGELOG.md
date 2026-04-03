@@ -3,6 +3,7 @@
 
 ## 2026-04-02
 
+- Fix #65: detect linger state before enabling (PR #67) — `loginctl show-user` check before `loginctl enable-linger` avoids pkttyagent error on headless systems without polkit; updated fallback hint to `sudo loginctl enable-linger`
 - Feat #61: systemd user service (PR #63) — `deploy/sandy.service`, `deploy/install.sh`, `restart.sh`; Sandy runs natively as a systemd user service; restart.sh is post-pull hook for itguy git-pull deploys
 - Feat #62: estimatedtaxes plugin (PR #64) — `tax summary`, `tax list`; read-only; 16 new tests (351 total)
 - Feat #59: IT Guy plugin (PR #60) — `itguy list`, `itguy deploy <svc>`, `itguy force <svc>` commands; graceful fallback when itguy not on PATH; 18 new tests
