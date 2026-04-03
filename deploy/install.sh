@@ -40,10 +40,14 @@ systemctl --user enable "$SERVICE_NAME"
 echo "  ✓ Enabled $SERVICE_NAME on boot"
 
 # Enable linger so user services start without login
-if loginctl enable-linger "$(whoami)" 2>/dev/null; then
+# Check first — if already enabled, skip (avoids polkit/pkttyagent on headless systems)
+_user="$(whoami)"
+if loginctl show-user "$_user" 2>/dev/null | grep -q "^Linger=yes"; then
+    echo "  ✓ Linger already enabled (service starts without login)"
+elif loginctl enable-linger "$_user" 2>/dev/null; then
     echo "  ✓ Enabled linger (service starts without login)"
 else
-    echo "  ⚠ Could not enable linger — run: loginctl enable-linger $(whoami)"
+    echo "  ⚠ Could not enable linger — run: sudo loginctl enable-linger $_user"
 fi
 
 echo ""
