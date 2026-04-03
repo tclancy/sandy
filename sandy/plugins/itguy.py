@@ -59,7 +59,7 @@ def handle(text: str, actor: str) -> dict:
     cmd = text.lower().strip()
 
     if cmd == "itguy list":
-        return _run("list")
+        return _run("list", "--format", "slack")
 
     if cmd.startswith("itguy deploy"):
         service = cmd[len("itguy deploy") :].strip()
