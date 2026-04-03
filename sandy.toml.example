@@ -81,6 +81,54 @@ active = "yes"
 FOOTBALL_DATA_API_KEY = "your-key-here"
 
 
+# ---- Estimated Taxes Plugin ----
+# Wraps the `estimatedtaxes` CLI tool (must be on PATH).
+# Env vars are injected into os.environ and inherited by the subprocess.
+[estimatedtaxes]
+active = "yes"
+
+ATEAM_EMAIL    = "your-ateam-email-here"
+ATEAM_PASSWORD = "your-ateam-password-here"
+
+
+# ---- IT Guy Plugin ----
+# Wraps the `itguy` CLI tool for homelab deploys (must be on PATH).
+# No env vars needed — itguy reads its own config from ~/.config/itguy/itguy.toml.
+[itguy]
+active = "yes"
+
+
+# ---- Cast to TV Plugin ----
+# Chromecast/Google TV control via pychromecast.
+[cast_to_tv]
+active = "yes"
+
+# Friendly name of the Chromecast device (run the plugin to see discovered names)
+CAST_DEVICE_NAME = "Living Room TV"
+# Seconds to wait for device discovery
+CAST_TIMEOUT     = "10"
+
+
+# ---- YouTube TV Plugin ----
+# Tunes YouTube TV channels via ADB over the network.
+# Requires ADB debugging enabled on the Google TV device.
+[youtube_tv]
+active = "yes"
+
+# IP address of the Google TV on the LAN (required)
+YOUTUBE_TV_ADB_HOST = "192.168.1.xxx"
+# ADB port (default: 5555)
+# YOUTUBE_TV_ADB_PORT = "5555"
+# Path to adb binary (default: "adb" on PATH)
+# YOUTUBE_TV_ADB_PATH = "adb"
+
+
+# ---- Health Plugin ----
+# Built-in diagnostic — lists all active plugins and commands. No config needed.
+[health]
+active = "yes"
+
+
 # ---- Dispatch Plugin ----
 # Read-only window into the Dispatch automation system. No API keys needed.
 # Disabled by default — only useful when Sandy runs on the same Mac as the

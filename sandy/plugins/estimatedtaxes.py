@@ -6,7 +6,10 @@ Commands:
   "tax sync"      — pull paid invoices from A*Team into the local database
 
 Requires ``estimatedtaxes`` to be installed and on PATH.
-ATEAM_EMAIL and ATEAM_PASSWORD env vars must be set for the sync command.
+ATEAM_EMAIL and ATEAM_PASSWORD must be set for the sync command — add them
+to the ``[estimatedtaxes]`` section of ``sandy.toml`` (UPPERCASE keys are
+injected into ``os.environ`` by Sandy's config loader before plugins run,
+and inherited by the subprocess).
 Returns a friendly error when not available (e.g. Sandy running remotely).
 """
 
