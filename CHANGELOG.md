@@ -1,6 +1,8 @@
 # Sandy Changelog
 
 ## 2026-04-03
+- Feat #72: itguy plugin adds `itguy status`, `itguy status <svc>`, `itguy disk` commands — status and disk output wrapped in Slack code blocks for monospace rendering; 365 tests passing
+- Feat #74: live-reload for plugin directory — daemon polls every 2s, reloads on file add/remove/modify; follows symlinks via stat(); keeps old plugins active if a broken file causes reload failure
 - Feat: estimatedtaxes plugin `tax summary` now uses `--format slack` (PR #70) — returns Slack monospace code block with aligned columns instead of raw CLI text; 354 tests passing
 
 ## 2026-04-02
