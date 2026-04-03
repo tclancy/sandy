@@ -61,7 +61,7 @@ def handle(text: str, actor: str) -> dict:
     cmd = text.lower().strip()
 
     if cmd == "tax summary":
-        return _run("summarize")
+        return _run("summarize", "--format", "slack")
 
     if cmd == "tax list":
         return _run("list")
