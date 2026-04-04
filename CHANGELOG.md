@@ -1,5 +1,8 @@
 # Sandy Changelog
 
+## 2026-04-04
+- Fix: CI failure on PR #76 — removed local-path dev deps (`../irs`, `../itguy`) from pyproject.toml that broke `uv sync` in GitHub Actions; deleted duplicate plugin test files (tests live in their packages); added matcher integration test to preserve coverage; 332 tests, 85.5% coverage
+
 ## 2026-04-03
 - Feat #72: itguy plugin adds `itguy status`, `itguy status <svc>`, `itguy disk` commands — status and disk output wrapped in Slack code blocks for monospace rendering; 365 tests passing
 - Feat #74: live-reload for plugin directory — daemon polls every 2s, reloads on file add/remove/modify; follows symlinks via stat(); keeps old plugins active if a broken file causes reload failure
