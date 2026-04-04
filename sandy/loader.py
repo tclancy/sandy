@@ -93,12 +93,13 @@ def _load_entry_point_plugins(config: dict) -> list:
         if not _validate_plugin(module, f"entry-point:{ep.name!r}"):
             continue
 
-        if not is_active(config, module.name):
+        if not is_active(config, module.name):  # _validate_plugin ensures module.name exists
             continue
 
         plugins.append(module)
 
-    return plugins
+    # Sort deterministically by plugin name (entry_points order is not spec-guaranteed)
+    return sorted(plugins, key=lambda m: m.name)
 
 
 def load_plugins(plugin_dir: str, config: dict | None = None) -> list:

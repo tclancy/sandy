@@ -14,7 +14,7 @@ def no_entry_points(monkeypatch):
     """Suppress real entry-point discovery in all daemon tests by default."""
     monkeypatch.setattr(
         "sandy.loader.importlib.metadata.entry_points",
-        lambda **kwargs: [],
+        lambda group=None, **kwargs: [],
     )
 
 
