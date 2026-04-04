@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from sandy.loader import load_plugins
+from sandy.matcher import find_matches
 
 
 @pytest.fixture(autouse=True)
@@ -320,3 +321,37 @@ def test_load_plugins_nonexistent_dir(tmp_path, monkeypatch):
     """load_plugins handles a nonexistent plugin_dir without error."""
     plugins = load_plugins(str(tmp_path / "does_not_exist"))
     assert plugins == []
+
+
+# ---------------------------------------------------------------------------
+# Matcher integration — representative plugin command shapes
+# ---------------------------------------------------------------------------
+
+
+def test_real_plugin_command_shapes_match_via_substring(tmp_path, monkeypatch):
+    """Plugin commands representative of real packages round-trip through find_matches."""
+    representative_commands = [
+        # itguy-style commands
+        "itguy list",
+        "itguy deploy sandy",
+        "itguy force recordclub",
+        "itguy status",
+        "itguy disk",
+        # estimatedtaxes-style commands
+        "tax summary",
+        "tax list",
+        "tax sync",
+    ]
+
+    class _FakePlugin:
+        name = "integration-test"
+        commands = representative_commands
+
+        def handle(self, text, actor):
+            return {"title": "test", "text": "ok"}
+
+    plugins = [_FakePlugin()]
+
+    for cmd in representative_commands:
+        assert find_matches(cmd, plugins), f"Expected '{cmd}' to match"
+    assert not find_matches("weather today", plugins)

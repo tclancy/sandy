@@ -29,10 +29,6 @@ select = ["E", "F", "C90"]
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
-[tool.uv.sources]
-itguy = { path = "../itguy" }
-estimatedtaxes = { path = "../irs" }
-
 [project.scripts]
 sandy = "sandy.cli:cli"
 
@@ -46,6 +42,4 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.11.0",
     "pre-commit>=4.0.0",
-    "itguy",
-    "estimatedtaxes",
 ]
