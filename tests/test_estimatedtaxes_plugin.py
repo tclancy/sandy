@@ -1,11 +1,15 @@
-"""Tests for sandy/plugins/estimatedtaxes.py."""
+"""Tests for estimatedtaxes/sandy_plugin.py (Sandy plugin for estimated taxes).
+
+The plugin now lives in the estimatedtaxes package and is discovered by Sandy
+via the 'sandy.plugins' entry point group.  These tests import it directly.
+"""
 
 from __future__ import annotations
 
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import sandy.plugins.estimatedtaxes as tax_plugin
+import estimatedtaxes.sandy_plugin as tax_plugin
 
 
 # ---------------------------------------------------------------------------

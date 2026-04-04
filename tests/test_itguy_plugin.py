@@ -1,12 +1,15 @@
-"""Tests for sandy/plugins/itguy.py."""
+"""Tests for itguy/sandy_plugin.py (Sandy plugin for IT Guy).
+
+The plugin now lives in the itguy package and is discovered by Sandy via
+the 'sandy.plugins' entry point group.  These tests import it directly.
+"""
 
 from __future__ import annotations
 
 import subprocess
 from unittest.mock import MagicMock, patch
 
-
-import sandy.plugins.itguy as itguy_plugin
+import itguy.sandy_plugin as itguy_plugin
 
 
 # ---------------------------------------------------------------------------
