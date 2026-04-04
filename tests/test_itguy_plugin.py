@@ -23,6 +23,8 @@ def test_commands():
     assert "itguy list" in cmds
     assert "itguy deploy" in cmds
     assert "itguy force" in cmds
+    assert "itguy status" in cmds
+    assert "itguy disk" in cmds
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +158,54 @@ def test_handle_unknown():
     assert "Unknown" in result["text"]
 
 
+def test_handle_status_all(monkeypatch):
+    dashboard = "SERVICE  STRATEGY  STATE\narrstack  config-only  running"
+    monkeypatch.setattr(itguy_plugin, "_run", lambda *args: {"title": "IT Guy", "text": dashboard})
+    result = itguy_plugin.handle("itguy status", "tom")
+    assert "```" in result["text"]
+    assert "SERVICE" in result["text"]
+
+
+def test_handle_status_single_service(monkeypatch):
+    detail = "arrstack (config-only) — running"
+    monkeypatch.setattr(itguy_plugin, "_run", lambda *args: {"title": "IT Guy", "text": detail})
+    result = itguy_plugin.handle("itguy status arrstack", "tom")
+    assert "```" in result["text"]
+    assert "arrstack" in result["text"]
+
+
+def test_handle_status_error_not_wrapped(monkeypatch):
+    monkeypatch.setattr(
+        itguy_plugin,
+        "_run",
+        lambda *args: {"title": "IT Guy", "text": "Error: unknown service 'oops'"},
+    )
+    result = itguy_plugin.handle("itguy status oops", "tom")
+    assert "Error" in result["text"]
+    assert "```" not in result["text"]
+
+
+def test_handle_disk(monkeypatch):
+    disk_output = "Docker\n  Images:      1.2G  reclaimable 200M"
+    monkeypatch.setattr(
+        itguy_plugin, "_run", lambda *args: {"title": "IT Guy", "text": disk_output}
+    )
+    result = itguy_plugin.handle("itguy disk", "tom")
+    assert "```" in result["text"]
+    assert "Docker" in result["text"]
+
+
+def test_handle_disk_error_not_wrapped(monkeypatch):
+    monkeypatch.setattr(
+        itguy_plugin,
+        "_run",
+        lambda *args: {"title": "IT Guy", "text": "Error: itguy exited with code 1"},
+    )
+    result = itguy_plugin.handle("itguy disk", "tom")
+    assert "Error" in result["text"]
+    assert "```" not in result["text"]
+
+
 # ---------------------------------------------------------------------------
 # Integration with matcher (substring match)
 # ---------------------------------------------------------------------------
@@ -173,4 +223,7 @@ def test_commands_match_via_substring():
     assert find_matches("itguy list", plugins)
     assert find_matches("itguy deploy sandy", plugins)
     assert find_matches("itguy force recordclub", plugins)
+    assert find_matches("itguy status", plugins)
+    assert find_matches("itguy status arrstack", plugins)
+    assert find_matches("itguy disk", plugins)
     assert not find_matches("weather today", plugins)

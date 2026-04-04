@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import sys
+from pathlib import Path
 
 from sandy.config import apply_env, load_config
 from sandy.loader import load_plugins
@@ -14,6 +15,15 @@ from sandy.progress import QueueProgressReporter
 from sandy.transport_loader import load_transports
 
 logger = logging.getLogger(__name__)
+
+_RELOAD_INTERVAL = 2.0  # seconds between plugin directory polls
+
+
+def _plugin_snapshot(plugin_dir: str) -> dict[str, float]:
+    """Return {filepath: mtime} for all .py plugin files (follows symlinks)."""
+    return {
+        str(p): p.stat().st_mtime for p in Path(plugin_dir).glob("*.py") if p.name != "__init__.py"
+    }
 
 
 class Daemon:
@@ -33,7 +43,9 @@ class Daemon:
         if transport_dir is None:
             transport_dir = os.path.join(os.path.dirname(__file__), "transports")
 
+        self.plugin_dir = plugin_dir
         self.plugins = load_plugins(plugin_dir, config)
+        self._plugin_mtimes = _plugin_snapshot(plugin_dir)
         logger.info(
             "Loaded %d content plugin(s): %s", len(self.plugins), [p.name for p in self.plugins]
         )
@@ -118,6 +130,37 @@ class Daemon:
             response["text"] = original_text.rstrip(".") + suffix
         return response
 
+    async def _watch_plugins(self) -> None:
+        """Poll plugin directory every _RELOAD_INTERVAL seconds and reload on change.
+
+        Uses Path.stat().st_mtime (follows symlinks) so changes to symlinked plugin
+        files are detected correctly — the mtime of the symlink target is compared.
+        New files and deleted files both trigger a reload.
+
+        If load_plugins raises (e.g. a plugin file has a syntax error), the previous
+        plugin set is kept active and the watcher continues polling.
+        """
+        while True:
+            await asyncio.sleep(_RELOAD_INTERVAL)
+            try:
+                current = _plugin_snapshot(self.plugin_dir)
+            except OSError:
+                continue
+            if current != self._plugin_mtimes:
+                logger.info("Plugin directory changed — reloading plugins")
+                try:
+                    new_plugins = load_plugins(self.plugin_dir, self.config)
+                except Exception:
+                    logger.exception("Failed to reload plugins — keeping previous plugin set")
+                    continue
+                self.plugins = new_plugins
+                self._plugin_mtimes = current
+                logger.info(
+                    "Reloaded %d plugin(s): %s",
+                    len(self.plugins),
+                    [p.name for p in self.plugins],
+                )
+
     async def run(self):
         """Start all transports and run until interrupted."""
         if not self.transports:
@@ -135,6 +178,8 @@ class Daemon:
             task = asyncio.create_task(transport.listen(self._handle_callback))
             tasks.append(task)
             logger.info("Transport '%s' started", transport.name)
+        tasks.append(asyncio.create_task(self._watch_plugins()))
+        logger.info("Plugin watcher started (polling every %.1fs)", _RELOAD_INTERVAL)
 
         await stop_event.wait()
         logger.info("Shutting down...")
