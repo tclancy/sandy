@@ -3,7 +3,19 @@ import os
 import textwrap
 import time
 from unittest.mock import patch
+
+import pytest
+
 from sandy.daemon import Daemon, _plugin_snapshot
+
+
+@pytest.fixture(autouse=True)
+def no_entry_points(monkeypatch):
+    """Suppress real entry-point discovery in all daemon tests by default."""
+    monkeypatch.setattr(
+        "sandy.loader.importlib.metadata.entry_points",
+        lambda group=None, **kwargs: [],
+    )
 
 
 def _make_plugins(tmp_path, subdir, plugins):
