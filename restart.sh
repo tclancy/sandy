@@ -20,6 +20,9 @@ echo "Syncing dependencies..."
 cd "$SCRIPT_DIR"
 uv sync --quiet
 
+echo "Installing sibling entry-point packages..."
+uv pip install -e ../itguy -e ../irs --quiet 2>/dev/null || true
+
 echo "Restarting sandy service..."
 systemctl --user restart sandy
 
