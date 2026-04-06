@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 .venv/
 *.egg-info/
+.coverage
 
 # Override global gitignore — uv.lock is needed for Docker build (uv sync --frozen)
 !uv.lock
