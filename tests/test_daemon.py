@@ -136,6 +136,77 @@ def test_callback_no_match_sends_fallback(tmp_path):
     asyncio.run(run())
 
 
+def test_callback_plugin_error_includes_detail(tmp_path):
+    """Daemon callback appends truncated error detail (in backticks) to the friendly message."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "bad.py": """
+            name = "bad"
+            commands = ["break things"]
+            def handle(text, actor):
+                raise RuntimeError("Something went wrong: API key missing")
+        """
+        },
+    )
+    daemon = Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    async def run():
+        replies = []
+
+        async def reply_fn(name, resp):
+            replies.append((name, resp))
+
+        await daemon._handle_callback("break things", "tom", reply_fn)
+
+        assert len(replies) == 1
+        name, resp = replies[0]
+        assert name == "error"
+        assert "bad" in resp["text"]
+        assert "does not want to behave" in resp["text"]
+        assert "`Something went wrong: API key missing`" in resp["text"]
+
+    asyncio.run(run())
+
+
+def test_callback_plugin_error_truncates_long_message(tmp_path):
+    """Daemon callback truncates error detail to 100 characters."""
+    long_msg = "x" * 150
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "bad.py": f"""
+            name = "bad"
+            commands = ["break things"]
+            def handle(text, actor):
+                raise RuntimeError("{long_msg}")
+        """
+        },
+    )
+    daemon = Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    async def run():
+        replies = []
+
+        async def reply_fn(name, resp):
+            replies.append((name, resp))
+
+        await daemon._handle_callback("break things", "tom", reply_fn)
+
+        assert len(replies) == 1
+        _, resp = replies[0]
+        # backtick-wrapped detail should be at most 100 chars + backticks
+        import re
+
+        match = re.search(r"`([^`]+)`", resp["text"])
+        assert match is not None
+        assert len(match.group(1)) == 100
+
+    asyncio.run(run())
+
+
 # ── pdf_url handling ──────────────────────────────────────────────────────────
 
 
