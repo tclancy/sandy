@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import textwrap
 import time
 from unittest.mock import patch
@@ -198,11 +199,41 @@ def test_callback_plugin_error_truncates_long_message(tmp_path):
         assert len(replies) == 1
         _, resp = replies[0]
         # backtick-wrapped detail should be at most 100 chars + backticks
-        import re
-
         match = re.search(r"`([^`]+)`", resp["text"])
         assert match is not None
         assert len(match.group(1)) == 100
+
+    asyncio.run(run())
+
+
+def test_callback_plugin_error_no_message_omits_backticks(tmp_path):
+    """Daemon callback omits backtick detail when exception has no message."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "bad.py": """
+            name = "bad"
+            commands = ["break things"]
+            def handle(text, actor):
+                raise RuntimeError()
+        """
+        },
+    )
+    daemon = Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    async def run():
+        replies = []
+
+        async def reply_fn(name, resp):
+            replies.append((name, resp))
+
+        await daemon._handle_callback("break things", "tom", reply_fn)
+
+        assert len(replies) == 1
+        _, resp = replies[0]
+        assert "does not want to behave" in resp["text"]
+        assert "`" not in resp["text"]
 
     asyncio.run(run())
 
