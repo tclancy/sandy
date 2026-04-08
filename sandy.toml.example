@@ -17,13 +17,16 @@
 # These apply to all plugins.
 
 # Printer used by the cryptics plugin.
-# Option 1 — CUPS queue name (run `lpstat -p` to find yours):
-# SANDY_PRINTER = "Brother_MFC_L2750DW_series"
-#
-# Option 2 — Direct IPP URI (recommended for Linux/homelab; bypasses CUPS
-# hostname/mDNS resolution). Find the printer's IP on your router, then:
+# Option 1 — Direct IPP URI (recommended for Linux/homelab).
+# Sandy sends print jobs directly to the printer over HTTP/IPP — no CUPS
+# registration, no lpadmin, no mDNS required.  Find the printer's IP on
+# your router, then set:
 # SANDY_PRINTER = "ipp://192.168.1.50/ipp/print"
 # Most Brother printers expose /ipp/print on port 631 (default IPP port).
+#
+# Option 2 — CUPS queue name (macOS / Linux with printer in CUPS).
+# Run `lpstat -p` to list registered queues, then set:
+# SANDY_PRINTER = "Brother_MFC_L2750DW_series"
 
 
 # ---- Music Discovery Plugin ----
