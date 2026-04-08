@@ -1,5 +1,8 @@
 # Sandy Changelog
 
+## 2026-04-07
+- Feat #84: plugin error messages now surface in Slack — daemon appends `str(e)[:100]` in backticks to the generic friendly error; empty-exception case handled cleanly; 335 tests, 85.9% coverage
+
 ## 2026-04-04
 - Fix: CI failure on PR #76 — removed local-path dev deps (`../irs`, `../itguy`) from pyproject.toml that broke `uv sync` in GitHub Actions; deleted duplicate plugin test files (tests live in their packages); added matcher integration test to preserve coverage; 332 tests, 85.5% coverage
 

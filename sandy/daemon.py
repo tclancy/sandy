@@ -107,6 +107,9 @@ class Daemon:
         for plugin_name, error_msg in errors:
             logger.debug("Dispatching error reply for '%s': %s", plugin_name, error_msg)
             friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
+            if error_msg:
+                detail = error_msg[:100]
+                friendly = f"{friendly} `{detail}`"
             await reply_fn("error", {"text": friendly})
         if not results and not errors:
             await reply_fn("sandy", {"text": "Sorry, I'm not sure how to do that."})
