@@ -2,7 +2,7 @@
 # Build: docker build -t ghcr.io/tclancy/sandy .
 # Run:   docker run --env-file .env -v /path/to/sandy.toml:/home/sandy/.config/sandy/sandy.toml ghcr.io/tclancy/sandy
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Install system deps for pychromecast (zeroconf), adb, and network printing
 RUN apt-get update && apt-get install -y --no-install-recommends \
