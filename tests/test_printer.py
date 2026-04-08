@@ -203,6 +203,33 @@ def test_ipp_print_direct_uses_correct_host_port(tmp_path):
     mock_cls.assert_called_once_with("192.168.1.50", 631, timeout=30)
 
 
+def test_ipp_print_direct_ipps_uses_https(tmp_path):
+    """ipps:// URIs must use HTTPSConnection, not HTTPConnection."""
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(b"%PDF")
+    mock_conn = _mock_ipp_connection()
+    with (
+        patch("sandy.printer.http.client.HTTPSConnection", return_value=mock_conn) as mock_cls,
+        patch("sandy.printer.http.client.HTTPConnection") as mock_plain,
+    ):
+        success, _ = _ipp_print_direct("ipps://192.168.1.50/ipp/print", str(pdf))
+    assert success is True
+    mock_cls.assert_called_once()
+    mock_plain.assert_not_called()
+
+
+def test_ipp_print_direct_status_0002_is_success(tmp_path):
+    """RFC 8011 status 0x0002 (successful-ok-conflicting-attributes) must be treated as success."""
+    pdf = tmp_path / "test.pdf"
+    pdf.write_bytes(b"%PDF")
+    body = struct.pack(">BBHIB", 1, 1, 0x0002, 1, 0x03)
+    mock_conn = _mock_ipp_connection(status=200, body=body)
+    with patch("sandy.printer.http.client.HTTPConnection", return_value=mock_conn):
+        success, detail = _ipp_print_direct("ipp://192.168.1.50/ipp/print", str(pdf))
+    assert success is True
+    assert detail == ""
+
+
 # ---------------------------------------------------------------------------
 # print_pdf — dispatch: IPP URI uses direct IPP, queue name uses lp
 # ---------------------------------------------------------------------------

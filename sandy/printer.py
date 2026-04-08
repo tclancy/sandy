@@ -101,33 +101,38 @@ def _ipp_print_direct(ipp_uri: str, pdf_path: str) -> tuple[bool, str]:
         if use_ssl:
             import ssl
 
-            ctx = ssl._create_unverified_context()
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
             conn: http.client.HTTPConnection = http.client.HTTPSConnection(
                 host, port, timeout=30, context=ctx
             )
         else:
             conn = http.client.HTTPConnection(host, port, timeout=30)
 
-        conn.request(
-            "POST",
-            path,
-            body,
-            {
-                "Content-Type": "application/ipp",
-                "Content-Length": str(len(body)),
-            },
-        )
-        response = conn.getresponse()
-        resp_data = response.read()
-        conn.close()
+        try:
+            conn.request(
+                "POST",
+                path,
+                body,
+                {
+                    "Content-Type": "application/ipp",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = conn.getresponse()
+            resp_data = response.read()
+        finally:
+            conn.close()
 
         if response.status not in (200, 202):
             return False, f"IPP server returned HTTP {response.status}"
 
-        # Parse IPP response status code (bytes 2–3 of the response body)
+        # Parse IPP response status code (bytes 2–3 of the response body).
+        # RFC 8011 successful codes: 0x0000, 0x0001, 0x0002.
         if len(resp_data) >= 4:
             status_code = struct.unpack(">H", resp_data[2:4])[0]
-            if status_code in (0x0000, 0x0001):  # successful-ok / ok-ignored-or-substituted
+            if status_code in (0x0000, 0x0001, 0x0002):
                 return True, ""
             return False, f"IPP status {status_code:#06x}"
 
@@ -214,9 +219,6 @@ def print_pdf(url: str, printer: str | None = None) -> tuple[bool, str]:
                 return False, detail
         finally:
             os.unlink(tmp_path)
-            ps_path = tmp_path.replace(".pdf", ".ps")
-            if os.path.exists(ps_path):
-                os.unlink(ps_path)
 
         logger.info("Printed PDF from %s to '%s'", url, printer)
         return True, ""
