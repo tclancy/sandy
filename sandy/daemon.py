@@ -7,10 +7,10 @@ import signal
 import sys
 from pathlib import Path
 
-from sandy.config import apply_env, load_config
+from sandy.config import apply_env, find_config_path, load_config
 from sandy.loader import load_plugins
 from sandy.pipeline import run_pipeline
-from sandy.printer import print_pdf
+from sandy.printer import _DEFAULT_PRINTER, print_pdf
 from sandy.progress import QueueProgressReporter
 from sandy.transport_loader import load_transports
 
@@ -213,5 +213,12 @@ def serve():
     config = load_config()
     apply_env(config)
     _configure_logging(config)
+    config_path = find_config_path()
+    printer_name = os.environ.get("SANDY_PRINTER", _DEFAULT_PRINTER)
+    logger.info(
+        "Config: %s | Printer: %s",
+        config_path or "(no sandy.toml found — using defaults)",
+        printer_name,
+    )
     daemon = Daemon(config=config)
     asyncio.run(daemon.run())

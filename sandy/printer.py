@@ -12,14 +12,20 @@ Set ``SANDY_PRINTER`` to a full IPP URI, e.g.::
 
     SANDY_PRINTER = "ipp://192.168.1.50/ipp/print"
 
-This bypasses CUPS queue lookup and prints directly to the printer by IP,
-which avoids mDNS/Bonjour hostname resolution issues on Linux.
+This bypasses CUPS entirely and prints directly to the printer by IP using
+the IPP protocol over HTTP. No CUPS registration required — works out of
+the box on Linux without ``lpadmin``.
+
+For CUPS-managed printers, use the queue name (``lpstat -p`` to list them).
 """
 
+import http.client
 import logging
 import os
+import struct
 import subprocess
 import tempfile
+import urllib.parse
 
 import requests
 
@@ -28,15 +34,131 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PRINTER = "Brother_MFC_L2750DW_series"
 
 
-def _build_lp_command(printer: str, file_path: str) -> list[str]:
-    """Return the lp command for the given printer and file.
+def _is_ipp_uri(printer: str) -> bool:
+    """Return True if *printer* looks like an IPP or IPPS URI."""
+    return printer.startswith("ipp://") or printer.startswith("ipps://")
 
-    Always uses ``lp -d`` which accepts both CUPS queue names and IPP URIs,
-    and is available on all platforms (macOS, Linux with cups-client).
-    ``lpr`` is intentionally avoided — it requires cups-bsd on Linux, which
-    is not installed by default.
+
+def _build_lp_command(printer: str, file_path: str) -> list[str]:
+    """Return the lp command for the given CUPS queue name and file.
+
+    For CUPS-registered queue names only. Use ``_ipp_print_direct`` for
+    IPP URIs — ``lp -d`` does not accept raw IPP URIs on all Linux systems.
     """
     return ["lp", "-d", printer, file_path]
+
+
+def _pack_ipp_attr(tag: int, name: str, value: bytes) -> bytes:
+    """Pack a single IPP attribute (tag + name + value)."""
+    name_bytes = name.encode("ascii")
+    return (
+        bytes([tag])
+        + struct.pack(">H", len(name_bytes))
+        + name_bytes
+        + struct.pack(">H", len(value))
+        + value
+    )
+
+
+def _ipp_print_direct(ipp_uri: str, pdf_path: str) -> tuple[bool, str]:
+    """Send a print-job directly to an IPP printer over HTTP, bypassing CUPS.
+
+    Implements a minimal IPP 1.1 Print-Job request (RFC 8011).  Works with any
+    IPP-capable printer accessible by IP — no CUPS queue registration needed.
+
+    Args:
+        ipp_uri: Full IPP URI, e.g. ``ipp://192.168.1.50/ipp/print``.
+        pdf_path: Local path to the PDF file to send.
+
+    Returns:
+        ``(True, "")`` on success, ``(False, detail)`` on failure.
+    """
+    parsed = urllib.parse.urlparse(ipp_uri)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 631
+    path = parsed.path or "/ipp/print"
+    use_ssl = ipp_uri.startswith("ipps://")
+
+    # Build IPP 1.1 Print-Job request body (RFC 8011 §4.4.1)
+    attrs = b"\x01"  # operation-attributes-tag
+    attrs += _pack_ipp_attr(0x47, "attributes-charset", b"utf-8")
+    attrs += _pack_ipp_attr(0x48, "attributes-natural-language", b"en-us")
+    attrs += _pack_ipp_attr(0x45, "printer-uri", ipp_uri.encode("ascii"))
+    attrs += _pack_ipp_attr(0x42, "requesting-user-name", b"sandy")
+    attrs += _pack_ipp_attr(0x42, "job-name", b"Sandy Print Job")
+    attrs += _pack_ipp_attr(0x49, "document-format", b"application/pdf")
+    attrs += b"\x03"  # end-of-attributes-tag
+
+    # IPP/1.1 header: version(2) + operation-id(2) + request-id(4)
+    header = struct.pack(">BBHI", 1, 1, 0x0002, 1)
+
+    with open(pdf_path, "rb") as f:
+        pdf_data = f.read()
+
+    body = header + attrs + pdf_data
+
+    try:
+        if use_ssl:
+            import ssl
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            conn: http.client.HTTPConnection = http.client.HTTPSConnection(
+                host, port, timeout=30, context=ctx
+            )
+        else:
+            conn = http.client.HTTPConnection(host, port, timeout=30)
+
+        try:
+            conn.request(
+                "POST",
+                path,
+                body,
+                {
+                    "Content-Type": "application/ipp",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            response = conn.getresponse()
+            resp_data = response.read()
+        finally:
+            conn.close()
+
+        if response.status not in (200, 202):
+            return False, f"IPP server returned HTTP {response.status}"
+
+        # Parse IPP response status code (bytes 2–3 of the response body).
+        # RFC 8011 successful codes: 0x0000, 0x0001, 0x0002.
+        if len(resp_data) >= 4:
+            status_code = struct.unpack(">H", resp_data[2:4])[0]
+            if status_code in (0x0000, 0x0001, 0x0002):
+                return True, ""
+            return False, f"IPP status {status_code:#06x}"
+
+        # HTTP 200/202 with no parseable IPP response — assume success
+        return True, ""
+    except Exception as exc:
+        return False, f"IPP direct print failed: {exc}"
+
+
+def _lp_print(printer: str, file_path: str) -> tuple[bool, str]:
+    """Print via ``lp -d <printer>`` for CUPS-registered queue names.
+
+    Returns ``(True, "")`` on success, ``(False, detail)`` on failure.
+    """
+    cmd = _build_lp_command(printer, file_path)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        stderr = (result.stderr or result.stdout or "").strip()
+        detail = f"lp exited {result.returncode}"
+        if stderr:
+            detail += f": {stderr}"
+        available = _list_cups_printers()
+        if available:
+            detail += f". CUPS printers: {available}"
+        return False, detail
+    return True, ""
 
 
 def _list_cups_printers() -> str | None:
@@ -59,10 +181,14 @@ def _list_cups_printers() -> str | None:
 def print_pdf(url: str, printer: str | None = None) -> tuple[bool, str]:
     """Download the PDF at *url* and send it to the printer.
 
+    If *printer* is an IPP URI (``ipp://`` or ``ipps://``), the job is sent
+    directly via HTTP/IPP without going through CUPS.  For CUPS queue names,
+    ``lp -d`` is used instead.
+
     Args:
         url: Direct URL to a PDF file.
-        printer: Printer name or IPP URI for ``lp``/``lpr``. Falls back to the
-            ``SANDY_PRINTER`` env var, then the built-in default.
+        printer: Printer name or IPP URI. Falls back to the ``SANDY_PRINTER``
+            env var, then the built-in default CUPS queue name.
 
     Returns:
         A ``(success, detail)`` tuple. *success* is True on success, False on
@@ -71,6 +197,8 @@ def print_pdf(url: str, printer: str | None = None) -> tuple[bool, str]:
     """
     if printer is None:
         printer = os.environ.get("SANDY_PRINTER", _DEFAULT_PRINTER)
+
+    logger.info("Printing PDF from %s to '%s'", url, printer)
 
     try:
         response = requests.get(url, timeout=30)
@@ -81,25 +209,18 @@ def print_pdf(url: str, printer: str | None = None) -> tuple[bool, str]:
             tmp_path = f.name
 
         try:
-            cmd = _build_lp_command(printer, tmp_path)
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                stderr = (result.stderr or result.stdout or "").strip()
-                detail = f"lp exited {result.returncode}"
-                if stderr:
-                    detail += f": {stderr}"
-                available = _list_cups_printers()
-                if available:
-                    detail += f". CUPS printers: {available}"
+            if _is_ipp_uri(printer):
+                success, detail = _ipp_print_direct(printer, tmp_path)
+            else:
+                success, detail = _lp_print(printer, tmp_path)
+
+            if not success:
                 logger.error("Print failed (printer='%s', url=%s): %s", printer, url, detail)
                 return False, detail
         finally:
             os.unlink(tmp_path)
-            ps_path = tmp_path.replace(".pdf", ".ps")
-            if os.path.exists(ps_path):
-                os.unlink(ps_path)
 
-        logger.info("Printed PDF from %s to printer '%s'", url, printer)
+        logger.info("Printed PDF from %s to '%s'", url, printer)
         return True, ""
     except Exception as exc:
         detail = str(exc)
