@@ -28,19 +28,15 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PRINTER = "Brother_MFC_L2750DW_series"
 
 
-def _is_ipp_uri(printer: str) -> bool:
-    return printer.startswith("ipp://") or printer.startswith("ipps://")
-
-
 def _build_lp_command(printer: str, file_path: str) -> list[str]:
-    """Return the lp/lpr command for the given printer and file.
+    """Return the lp command for the given printer and file.
 
-    If *printer* is an IPP URI, uses ``lp -d URI`` for direct network printing.
-    Otherwise falls back to ``lpr -P name`` for a CUPS-named queue.
+    Always uses ``lp -d`` which accepts both CUPS queue names and IPP URIs,
+    and is available on all platforms (macOS, Linux with cups-client).
+    ``lpr`` is intentionally avoided — it requires cups-bsd on Linux, which
+    is not installed by default.
     """
-    if _is_ipp_uri(printer):
-        return ["lp", "-d", printer, file_path]
-    return ["lpr", "-P", printer, file_path]
+    return ["lp", "-d", printer, file_path]
 
 
 def _list_cups_printers() -> str | None:
@@ -89,7 +85,7 @@ def print_pdf(url: str, printer: str | None = None) -> tuple[bool, str]:
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 stderr = (result.stderr or result.stdout or "").strip()
-                detail = f"lpr/lp exited {result.returncode}"
+                detail = f"lp exited {result.returncode}"
                 if stderr:
                     detail += f": {stderr}"
                 available = _list_cups_printers()
