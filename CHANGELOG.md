@@ -1,5 +1,8 @@
 # Sandy Changelog
 
+## 2026-04-08
+- Fix #55: always use `lp -d` for print commands — removes `lpr` (cups-bsd) dependency that's not installed by default on Linux; `lp -d` works for both CUPS queue names and IPP URIs; removes dead `_is_ipp_uri` function; adds regression test `test_print_pdf_ipp_env_uses_lp` (330 tests, 85.5% coverage)
+
 ## 2026-04-04
 - Fix: CI failure on PR #76 — removed local-path dev deps (`../irs`, `../itguy`) from pyproject.toml that broke `uv sync` in GitHub Actions; deleted duplicate plugin test files (tests live in their packages); added matcher integration test to preserve coverage; 332 tests, 85.5% coverage
 
