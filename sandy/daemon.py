@@ -10,7 +10,7 @@ from pathlib import Path
 from sandy.config import apply_env, find_config_path, load_config
 from sandy.loader import load_plugins
 from sandy.pipeline import run_pipeline
-from sandy.printer import _DEFAULT_PRINTER, print_pdf
+from sandy.printer import _DEFAULT_PRINTER, _is_ipp_uri, print_pdf
 from sandy.progress import QueueProgressReporter
 from sandy.transport_loader import load_transports
 
@@ -215,8 +215,6 @@ def serve():
     _configure_logging(config)
     config_path = find_config_path()
     printer_name = os.environ.get("SANDY_PRINTER", _DEFAULT_PRINTER)
-    from sandy.printer import _is_ipp_uri
-
     if _is_ipp_uri(printer_name):
         logger.info(
             "Config: %s | Printer: %s (IPP direct)",

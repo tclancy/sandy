@@ -1,9 +1,33 @@
 """Tests for sandy.plugins.printer_status."""
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from sandy.plugins.printer_status import _printer_status, handle
+from sandy.plugins.printer_status import _printer_status, _test_ipp_connectivity, handle
+
+
+def test_test_ipp_connectivity_reachable():
+    mock_sock = MagicMock()
+    with patch("socket.create_connection", return_value=mock_sock):
+        ok, detail = _test_ipp_connectivity("ipp://192.168.1.50/ipp/print")
+    assert ok is True
+    assert "192.168.1.50:631" in detail
+    mock_sock.close.assert_called_once()
+
+
+def test_test_ipp_connectivity_unreachable():
+    with patch("socket.create_connection", side_effect=OSError("Connection refused")):
+        ok, detail = _test_ipp_connectivity("ipp://192.168.1.50/ipp/print")
+    assert ok is False
+    assert "Connection refused" in detail
+
+
+def test_test_ipp_connectivity_custom_port():
+    mock_sock = MagicMock()
+    with patch("socket.create_connection", return_value=mock_sock) as mock_connect:
+        ok, _ = _test_ipp_connectivity("ipp://printer.local:9631/ipp/print")
+    assert ok is True
+    mock_connect.assert_called_once_with(("printer.local", 9631), timeout=5)
 
 
 def test_handle_printer_status_routes():

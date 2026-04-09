@@ -198,9 +198,10 @@ def _lp_print(printer: str, file_path: str) -> tuple[bool, str]:
             logger.info("Discovered IPP URIs: %s", discovered)
             # Try discovered URIs — prefer ones that contain the printer name
             name_lower = printer.lower().replace("_", "-").replace(" ", "-")
+            vendor_token = name_lower.split("-")[0]
             ordered = sorted(
                 discovered,
-                key=lambda u: 0 if name_lower.split("_")[0][:6] in u.lower() else 1,
+                key=lambda u: 0 if vendor_token in u.lower() else 1,
             )
             for ipp_uri in ordered:
                 logger.info("Trying discovered IPP URI: %s", ipp_uri)
