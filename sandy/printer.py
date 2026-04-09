@@ -142,23 +142,97 @@ def _ipp_print_direct(ipp_uri: str, pdf_path: str) -> tuple[bool, str]:
         return False, f"IPP direct print failed: {exc}"
 
 
+def _discover_ipp_uris() -> list[str]:
+    """Try to discover available IPP printer URIs via ``lpinfo -v``.
+
+    Returns a list of IPP URIs (may be empty if discovery fails or finds none).
+    Runs ``lpinfo -v`` with a short timeout — safe to call even if CUPS is not
+    running (it fails gracefully).
+    """
+    try:
+        result = subprocess.run(
+            ["lpinfo", "-v"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        uris = []
+        for line in result.stdout.splitlines():
+            parts = line.split(None, 1)
+            if len(parts) == 2 and parts[1].startswith(("ipp://", "ipps://")):
+                uris.append(parts[1].strip())
+        return uris
+    except Exception:
+        return []
+
+
 def _lp_print(printer: str, file_path: str) -> tuple[bool, str]:
     """Print via ``lp -d <printer>`` for CUPS-registered queue names.
+
+    When the printer is not found in CUPS, automatically attempts IPP discovery
+    via ``lpinfo -v`` and retries with any discovered IPP URI that matches the
+    printer name.  This allows printing to succeed even when CUPS has no
+    registered queue, as long as the printer is accessible on the network.
 
     Returns ``(True, "")`` on success, ``(False, detail)`` on failure.
     """
     cmd = _build_lp_command(printer, file_path)
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        stderr = (result.stderr or result.stdout or "").strip()
-        detail = f"lp exited {result.returncode}"
-        if stderr:
-            detail += f": {stderr}"
-        available = _list_cups_printers()
-        if available:
-            detail += f". CUPS printers: {available}"
-        return False, detail
-    return True, ""
+    if result.returncode == 0:
+        return True, ""
+
+    stderr = (result.stderr or result.stdout or "").strip()
+    cups_detail = f"lp exited {result.returncode}"
+    if stderr:
+        cups_detail += f": {stderr}"
+
+    # When the printer isn't found in CUPS, try IPP auto-discovery.
+    # This handles the common Linux homelab case where the printer is on the
+    # network but not registered in CUPS.
+    if "does not exist" in stderr or "not found" in stderr.lower():
+        logger.info(
+            "CUPS printer %r not found — attempting IPP auto-discovery via lpinfo -v", printer
+        )
+        discovered = _discover_ipp_uris()
+        if discovered:
+            logger.info("Discovered IPP URIs: %s", discovered)
+            # Try discovered URIs — prefer ones that contain the printer name
+            name_lower = printer.lower().replace("_", "-").replace(" ", "-")
+            vendor_token = name_lower.split("-")[0]
+            ordered = sorted(
+                discovered,
+                key=lambda u: 0 if vendor_token in u.lower() else 1,
+            )
+            for ipp_uri in ordered:
+                logger.info("Trying discovered IPP URI: %s", ipp_uri)
+                ok, detail = _ipp_print_direct(ipp_uri, file_path)
+                if ok:
+                    logger.info(
+                        "Auto-discovered printer succeeded via %s. "
+                        "Set SANDY_PRINTER = %r in sandy.toml to skip this step.",
+                        ipp_uri,
+                        ipp_uri,
+                    )
+                    return True, ""
+            # Discovery found URIs but none worked
+            uri_list = ", ".join(discovered[:3])
+            return (
+                False,
+                f"{cups_detail}. IPP discovery found {len(discovered)} printer(s) ({uri_list}) "
+                f"but all failed. Set SANDY_PRINTER to one of these URIs in sandy.toml.",
+            )
+
+    # No discovery or no printers found — give a clear action hint
+    action_hint = (
+        " To fix: find your printer's IP on your router, then add "
+        'SANDY_PRINTER = "ipp://PRINTER_IP/ipp/print" to sandy.toml.'
+    )
+    available = _list_cups_printers()
+    if available:
+        cups_detail += f". CUPS printers: {available}"
+    else:
+        cups_detail += "." + action_hint
+    return False, cups_detail
 
 
 def _list_cups_printers() -> str | None:
