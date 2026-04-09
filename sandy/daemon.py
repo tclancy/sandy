@@ -215,10 +215,24 @@ def serve():
     _configure_logging(config)
     config_path = find_config_path()
     printer_name = os.environ.get("SANDY_PRINTER", _DEFAULT_PRINTER)
-    logger.info(
-        "Config: %s | Printer: %s",
-        config_path or "(no sandy.toml found — using defaults)",
-        printer_name,
-    )
+    from sandy.printer import _is_ipp_uri
+
+    if _is_ipp_uri(printer_name):
+        logger.info(
+            "Config: %s | Printer: %s (IPP direct)",
+            config_path or "(no sandy.toml found — using defaults)",
+            printer_name,
+        )
+    else:
+        logger.info(
+            "Config: %s | Printer: %s (CUPS queue — will attempt IPP discovery on failure)",
+            config_path or "(no sandy.toml found — using defaults)",
+            printer_name,
+        )
+        logger.warning(
+            "SANDY_PRINTER is a CUPS queue name, not an IPP URI. "
+            'If printing fails, set SANDY_PRINTER = "ipp://PRINTER_IP/ipp/print" in sandy.toml. '
+            "Most Brother printers use /ipp/print on port 631."
+        )
     daemon = Daemon(config=config)
     asyncio.run(daemon.run())

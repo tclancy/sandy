@@ -99,6 +99,7 @@ def test_lp_print_failure_includes_stderr(tmp_path):
             return_value=_mock_run_failure("lp: Error - The printer or class does not exist."),
         ),
         patch("sandy.printer._list_cups_printers", return_value=None),
+        patch("sandy.printer._discover_ipp_uris", return_value=[]),
     ):
         success, detail = _lp_print("BadPrinter", str(pdf))
     assert success is False
