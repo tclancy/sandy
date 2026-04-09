@@ -814,6 +814,7 @@ dependencies = [
     { name = "pychromecast" },
     { name = "pylast" },
     { name = "requests" },
+    { name = "sentry-sdk" },
     { name = "slack-bolt" },
     { name = "spotipy" },
 ]
@@ -832,6 +833,7 @@ requires-dist = [
     { name = "pychromecast", specifier = ">=14.0.10" },
     { name = "pylast", specifier = ">=7.0.2" },
     { name = "requests", specifier = ">=2.32.5" },
+    { name = "sentry-sdk", specifier = ">=2.57.0" },
     { name = "slack-bolt", specifier = ">=1.27.0" },
     { name = "spotipy", specifier = ">=2.24.0" },
 ]
@@ -842,6 +844,19 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "ruff", specifier = ">=0.11.0" },
+]
+
+[[package]]
+name = "sentry-sdk"
+version = "2.57.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4f/87/46c0406d8b5ddd026f73adaf5ab75ce144219c41a4830b52df4b9ab55f7f/sentry_sdk-2.57.0.tar.gz", hash = "sha256:4be8d1e71c32fb27f79c577a337ac8912137bba4bcbc64a4ec1da4d6d8dc5199", size = 435288, upload-time = "2026-03-31T09:39:29.264Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c9/64/982e07b93219cb52e1cca5d272cb579e2f3eb001956c9e7a9a6d106c9473/sentry_sdk-2.57.0-py2.py3-none-any.whl", hash = "sha256:812c8bf5ff3d2f0e89c82f5ce80ab3a6423e102729c4706af7413fd1eb480585", size = 456489, upload-time = "2026-03-31T09:39:27.524Z" },
 ]
 
 [[package]]
