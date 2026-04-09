@@ -1,5 +1,10 @@
 # Sandy Changelog
 
+## 2026-04-09
+- Feat #55: `printer status` Slack command — shows current SANDY_PRINTER value, IPP vs CUPS type, TCP connectivity test for IPP URIs, available CUPS queues, and auto-discovered IPP printers; enables full printer diagnosis without SSH (351 tests, 84.90% coverage)
+- Feat: IPP auto-discovery fallback in `_lp_print` — when CUPS says "printer does not exist", tries `lpinfo -v` to find IPP URIs on the network and retries with them; logs discovered URI on success so Tom can save it to sandy.toml permanently
+- Feat: startup logging now distinguishes IPP vs CUPS printer with a warning when SANDY_PRINTER is a CUPS queue name
+
 ## 2026-04-08
 - Fix #55 (part 2): bypass CUPS for IPP URI printers — when SANDY_PRINTER is an `ipp://` URI, Sandy now sends the job directly via HTTP/IPP (RFC 8011) without going through CUPS; fixes `lp: Error - The printer or class does not exist` on Linux homelab where CUPS does not accept raw URIs as queue destinations; also logs config path and resolved printer name at startup for easy diagnosis (342 tests, 85.93% coverage)
 - Fix #55: always use `lp -d` for print commands — removes `lpr` (cups-bsd) dependency that's not installed by default on Linux; `lp -d` works for both CUPS queue names and IPP URIs; removes dead `_is_ipp_uri` function; adds regression test `test_print_pdf_ipp_env_uses_lp` (330 tests, 85.5% coverage)
