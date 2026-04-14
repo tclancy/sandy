@@ -42,10 +42,10 @@ def test_commands_include_all_three():
     assert "dispatch status" in cmds
     assert "dispatch check" in cmds
     assert "dispatch pm" in cmds
-    # short aliases
-    assert "status" in cmds
-    assert "check" in cmds
-    assert "pm" in cmds
+    # no shortnames — all commands require the dispatch prefix
+    assert "status" not in cmds
+    assert "check" not in cmds
+    assert "pm" not in cmds
 
 
 def test_commands_do_not_include_inbox():
@@ -219,29 +219,34 @@ def test_pm_remote_context(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_handle_status(dispatch_dir, monkeypatch):
-    monkeypatch.setattr(dispatch_plugin, "_cmd_status", lambda: {"text": "status result"})
-    assert dispatch_plugin.handle("status", "tom") == {"text": "status result"}
-
-
 def test_handle_dispatch_status(dispatch_dir, monkeypatch):
     monkeypatch.setattr(dispatch_plugin, "_cmd_status", lambda: {"text": "status result"})
     assert dispatch_plugin.handle("dispatch status", "tom") == {"text": "status result"}
 
 
-def test_handle_check(dispatch_dir, monkeypatch):
+def test_handle_dispatch_check(dispatch_dir, monkeypatch):
     monkeypatch.setattr(dispatch_plugin, "_cmd_check", lambda: {"text": "check result"})
-    assert dispatch_plugin.handle("check", "tom") == {"text": "check result"}
-
-
-def test_handle_pm(dispatch_dir, monkeypatch):
-    monkeypatch.setattr(dispatch_plugin, "_cmd_pm", lambda: {"text": "pm result"})
-    assert dispatch_plugin.handle("pm", "tom") == {"text": "pm result"}
+    assert dispatch_plugin.handle("dispatch check", "tom") == {"text": "check result"}
 
 
 def test_handle_dispatch_pm(dispatch_dir, monkeypatch):
     monkeypatch.setattr(dispatch_plugin, "_cmd_pm", lambda: {"text": "pm result"})
     assert dispatch_plugin.handle("dispatch pm", "tom") == {"text": "pm result"}
+
+
+def test_handle_shortname_status_rejected():
+    result = dispatch_plugin.handle("status", "tom")
+    assert "Unknown" in result["text"]
+
+
+def test_handle_shortname_check_rejected():
+    result = dispatch_plugin.handle("check", "tom")
+    assert "Unknown" in result["text"]
+
+
+def test_handle_shortname_pm_rejected():
+    result = dispatch_plugin.handle("pm", "tom")
+    assert "Unknown" in result["text"]
 
 
 def test_handle_unknown_command():
@@ -251,5 +256,5 @@ def test_handle_unknown_command():
 
 def test_handle_case_insensitive(monkeypatch):
     monkeypatch.setattr(dispatch_plugin, "_cmd_status", lambda: {"text": "ok"})
-    assert dispatch_plugin.handle("STATUS", "tom") == {"text": "ok"}
     assert dispatch_plugin.handle("Dispatch Status", "tom") == {"text": "ok"}
+    assert dispatch_plugin.handle("DISPATCH STATUS", "tom") == {"text": "ok"}
