@@ -4,9 +4,9 @@ Read-only window into the Dispatch automation system. Fast, safe — no
 agents are launched.
 
 Commands:
-  "dispatch status" / "status"  — current state from memory.md
-  "dispatch check"  / "check"   — recent run activity and lock status
-  "dispatch pm"     / "pm"      — contents of PM Inbox.md
+  "dispatch status"  — current state from memory.md
+  "dispatch check"   — recent run activity and lock status
+  "dispatch pm"      — contents of PM Inbox.md
 
 The plugin reads files directly so it returns instantly, unlike the
 dispatch CLI modes that launch full Claude agent sessions.
@@ -27,9 +27,6 @@ commands = [
     "dispatch status",
     "dispatch check",
     "dispatch pm",
-    "status",
-    "check",
-    "pm",
 ]
 
 # Default location — can be overridden by DISPATCH_OBSIDIAN_DIR env var
@@ -193,11 +190,8 @@ def _cmd_pm() -> dict:
 
 _DISPATCH: dict[str, str] = {
     "dispatch status": "_cmd_status",
-    "status": "_cmd_status",
     "dispatch check": "_cmd_check",
-    "check": "_cmd_check",
     "dispatch pm": "_cmd_pm",
-    "pm": "_cmd_pm",
 }
 
 
