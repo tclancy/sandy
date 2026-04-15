@@ -14,11 +14,14 @@ Required environment variables (set via [music_discovery] in sandy.toml):
     SPOTIFY_PLAYLIST_ID     — Spotify playlist ID to populate
 """
 
+import logging
 import os
 
 import pylast
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+
+logger = logging.getLogger(__name__)
 
 name = "music_discovery"
 commands = ["find me new music", "discover music", "new music"]
@@ -187,9 +190,29 @@ def handle(text: str, actor: str, progress=None) -> dict:
         return {"text": "Could not find any candidate tracks on Spotify."}
 
     if progress:
-        progress(f"Populating playlist with {len(uris)} tracks…")
+        progress(f"Found {len(uris)} tracks — clearing existing playlist…")
 
-    sp.playlist_replace_items(playlist_id, uris)
+    # Two-step update: clear existing tracks, then add new ones in chunks.
+    # Splitting into two calls makes each failure surface with the right message.
+    # playlist_add_items accepts at most 100 URIs per call, so we chunk.
+    try:
+        sp.playlist_replace_items(playlist_id, [])
+    except Exception as e:
+        logger.exception("Spotify clear step failed")
+        return {"text": f"Spotify playlist update failed (could not clear): {e}"}
+
+    _CHUNK = 100
+    try:
+        for i in range(0, len(uris), _CHUNK):
+            sp.playlist_add_items(playlist_id, uris[i : i + _CHUNK])
+    except Exception as e:
+        logger.exception("Spotify add step failed after playlist was cleared")
+        return {
+            "text": (
+                f"Spotify playlist update failed (could not add tracks): {e}. "
+                "The playlist has been cleared — run again to repopulate."
+            )
+        }
 
     playlist_url = f"https://open.spotify.com/playlist/{playlist_id}"
     return {
