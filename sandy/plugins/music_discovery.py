@@ -187,9 +187,17 @@ def handle(text: str, actor: str, progress=None) -> dict:
         return {"text": "Could not find any candidate tracks on Spotify."}
 
     if progress:
-        progress(f"Populating playlist with {len(uris)} tracks…")
+        progress(f"Found {len(uris)} tracks — clearing existing playlist…")
 
-    sp.playlist_replace_items(playlist_id, uris)
+    try:
+        # Two-step: clear all existing tracks, then add the new batch.
+        # Using replace([], ...) + add_items() is more explicit than a single
+        # playlist_replace_items(uris) call, and makes the clear step visible
+        # in logs if the add step fails.
+        sp.playlist_replace_items(playlist_id, [])
+        sp.playlist_add_items(playlist_id, uris)
+    except Exception as e:
+        return {"text": f"Spotify playlist update failed: {e}"}
 
     playlist_url = f"https://open.spotify.com/playlist/{playlist_id}"
     return {
