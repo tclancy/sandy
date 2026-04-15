@@ -300,8 +300,8 @@ def test_handle_clears_existing_tracks(monkeypatch):
     assert result["title"] == "Music Discovery"
 
 
-def test_handle_spotify_update_error(monkeypatch):
-    """Spotify API error during playlist update returns an error message."""
+def test_handle_spotify_clear_error(monkeypatch):
+    """Spotify API error during playlist clear returns an error message."""
     monkeypatch.setenv("LASTFM_USERNAME", "yerfatma")
     monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "someplaylist")
 
@@ -325,6 +325,38 @@ def test_handle_spotify_update_error(monkeypatch):
 
     assert "playlist update failed" in result["text"].lower()
     assert "403 Forbidden" in result["text"]
+    # Clear failed, so old tracks still exist — no empty-playlist warning needed
+    assert "cleared" not in result["text"].lower()
+
+
+def test_handle_spotify_add_error_warns_playlist_empty(monkeypatch):
+    """If add fails after a successful clear, the error message warns the playlist is empty."""
+    monkeypatch.setenv("LASTFM_USERNAME", "yerfatma")
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "someplaylist")
+
+    mock_sp = MagicMock()
+    mock_sp.playlist_replace_items.return_value = None  # clear succeeds
+    mock_sp.playlist_add_items.side_effect = Exception("500 Server Error")
+
+    with patch.object(music_discovery, "_get_lastfm_network"):
+        with patch.object(music_discovery, "_get_top_artists", return_value=["Radiohead"]):
+            with patch.object(
+                music_discovery,
+                "_collect_candidate_tracks",
+                return_value=[("Mogwai", "Friend of the Night")],
+            ):
+                with patch.object(music_discovery, "_get_spotify_client", return_value=mock_sp):
+                    with patch.object(
+                        music_discovery,
+                        "_search_spotify_track",
+                        return_value="spotify:track:abc",
+                    ):
+                        result = music_discovery.handle("new music", "tom")
+
+    assert "playlist update failed" in result["text"].lower()
+    assert "500 Server Error" in result["text"]
+    # Must warn the user the playlist was cleared so they know it's empty
+    assert "cleared" in result["text"].lower()
 
 
 def test_handle_deduplicates_uris(monkeypatch):
