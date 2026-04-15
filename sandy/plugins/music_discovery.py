@@ -24,7 +24,7 @@ from spotipy.oauth2 import SpotifyOAuth
 logger = logging.getLogger(__name__)
 
 name = "music_discovery"
-commands = ["find me new music", "discover music", "new music"]
+commands = ["find me new music", "discover music", "new music", "music save"]
 
 # How many of the user's top artists to seed from
 TOP_ARTISTS_LIMIT = 10
@@ -166,16 +166,77 @@ def _resolve_spotify_uris(
     return uris
 
 
-def handle(text: str, actor: str, progress=None) -> dict:
-    """Discover new music via Last.fm and populate a Spotify playlist."""
-    username = os.environ.get("LASTFM_USERNAME", "")
-    playlist_id = os.environ.get("SPOTIFY_PLAYLIST_ID", "")
+def _get_playlist_track_uris(sp: spotipy.Spotify, playlist_id: str) -> list[str]:
+    """Return all track URIs in a Spotify playlist, handling pagination."""
+    uris: list[str] = []
+    results = sp.playlist_items(playlist_id, fields="items(track(uri)),next", limit=100)
+    while results:
+        for item in results.get("items", []):
+            track = item.get("track") or {}
+            uri = track.get("uri")
+            if uri:
+                uris.append(uri)
+        results = sp.next(results) if results.get("next") else None
+    return uris
 
-    if not username:
-        return {"text": "LASTFM_USERNAME not configured."}
+
+def _save_playlist(sp: spotipy.Spotify, source_playlist_id: str, new_name: str) -> dict:
+    """Copy all tracks from *source_playlist_id* into a new playlist named *new_name*.
+
+    Returns a Sandy response dict.
+    """
+    try:
+        uris = _get_playlist_track_uris(sp, source_playlist_id)
+    except Exception as e:
+        logger.exception("Failed to fetch tracks from source playlist")
+        return {"text": f"Could not read source playlist: {e}"}
+
+    if not uris:
+        return {"text": "The Sandy discovery playlist is empty — run 'new music' first."}
+
+    try:
+        me = sp.me()
+        user_id = me["id"]
+        new_playlist = sp.user_playlist_create(user_id, new_name, public=False)
+        new_playlist_id = new_playlist["id"]
+    except Exception as e:
+        logger.exception("Failed to create new Spotify playlist")
+        return {"text": f"Could not create playlist '{new_name}': {e}"}
+
+    _CHUNK = 100
+    try:
+        for i in range(0, len(uris), _CHUNK):
+            sp.playlist_add_items(new_playlist_id, uris[i : i + _CHUNK])
+    except Exception as e:
+        logger.exception("Failed to add tracks to new playlist")
+        return {"text": f"Created '{new_name}' but could not add tracks: {e}"}
+
+    new_url = f"https://open.spotify.com/playlist/{new_playlist_id}"
+    return {
+        "title": "Playlist Saved",
+        "text": f"Saved {len(uris)} tracks to new playlist '{new_name}'.",
+        "links": [{"label": f"Open {new_name}", "url": new_url}],
+    }
+
+
+def _handle_save(text: str, playlist_id: str) -> dict:
+    """Handle the 'music save <name>' command path."""
+    normalized = text.lower().strip()
+    save_prefix = normalized.index("music save") + len("music save")
+    new_name = text.strip()[save_prefix:].strip()
+    if not new_name:
+        return {"text": "Usage: 'music save <playlist name>'"}
     if not playlist_id:
         return {"text": "SPOTIFY_PLAYLIST_ID not configured."}
+    try:
+        sp = _get_spotify_client()
+    except Exception as e:
+        return {"text": f"Spotify auth failed: {e}"}
+    return _save_playlist(sp, playlist_id, new_name)
 
+
+def _handle_discover(username: str, playlist_id: str, progress=None) -> dict:
+    """Run the music discovery flow and populate the Spotify playlist."""
     candidates, error = _get_lastfm_candidates(username, progress=progress)
     if error:
         return {"text": error}
@@ -220,3 +281,24 @@ def handle(text: str, actor: str, progress=None) -> dict:
         "text": f"Added {len(uris)} discovered tracks to your playlist.",
         "links": [{"label": "Open discovery playlist", "url": playlist_url}],
     }
+
+
+def handle(text: str, actor: str, progress=None) -> dict:
+    """Discover new music, or save the current discovery playlist.
+
+    Commands:
+      find me new music / discover music / new music — run music discovery
+      music save <playlist_name> — copy current discovery playlist to a new named playlist
+    """
+    playlist_id = os.environ.get("SPOTIFY_PLAYLIST_ID", "")
+
+    if "music save" in text.lower():
+        return _handle_save(text, playlist_id)
+
+    username = os.environ.get("LASTFM_USERNAME", "")
+    if not username:
+        return {"text": "LASTFM_USERNAME not configured."}
+    if not playlist_id:
+        return {"text": "SPOTIFY_PLAYLIST_ID not configured."}
+
+    return _handle_discover(username, playlist_id, progress=progress)
