@@ -359,6 +359,105 @@ def test_handle_spotify_add_error_warns_playlist_empty(monkeypatch):
     assert "cleared" in result["text"].lower()
 
 
+# ---------------------------------------------------------------------------
+# music save command
+# ---------------------------------------------------------------------------
+
+
+def test_handle_save_no_playlist_id(monkeypatch):
+    """save returns error when SPOTIFY_PLAYLIST_ID is not set."""
+    monkeypatch.delenv("SPOTIFY_PLAYLIST_ID", raising=False)
+    result = music_discovery.handle("music save My Playlist", "tom")
+    assert "SPOTIFY_PLAYLIST_ID" in result["text"]
+
+
+def test_handle_save_no_name(monkeypatch):
+    """save without a name returns usage hint."""
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "someplaylist")
+    result = music_discovery.handle("music save", "tom")
+    assert "Usage" in result["text"]
+
+
+def test_handle_save_spotify_auth_failure(monkeypatch):
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "someplaylist")
+    with patch.object(music_discovery, "_get_spotify_client", side_effect=Exception("no creds")):
+        result = music_discovery.handle("music save My Mix", "tom")
+    assert "Spotify auth failed" in result["text"]
+
+
+def test_handle_save_empty_source_playlist(monkeypatch):
+    """save returns error when source playlist has no tracks."""
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "someplaylist")
+    mock_sp = MagicMock()
+    with patch.object(music_discovery, "_get_spotify_client", return_value=mock_sp):
+        with patch.object(music_discovery, "_get_playlist_track_uris", return_value=[]):
+            result = music_discovery.handle("music save My Mix", "tom")
+    assert "empty" in result["text"].lower()
+
+
+def test_handle_save_creates_new_playlist(monkeypatch):
+    """save creates a new playlist and copies tracks from source."""
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "source-playlist-id")
+
+    mock_sp = MagicMock()
+    mock_sp.me.return_value = {"id": "spotify-user-123"}
+    mock_sp.user_playlist_create.return_value = {"id": "new-playlist-id"}
+
+    with patch.object(music_discovery, "_get_spotify_client", return_value=mock_sp):
+        with patch.object(
+            music_discovery,
+            "_get_playlist_track_uris",
+            return_value=["spotify:track:aaa", "spotify:track:bbb"],
+        ):
+            result = music_discovery.handle("music save April Discoveries", "tom")
+
+    assert result["title"] == "Playlist Saved"
+    assert "2" in result["text"]
+    assert "April Discoveries" in result["text"]
+    assert "new-playlist-id" in result["links"][0]["url"]
+    mock_sp.user_playlist_create.assert_called_once_with(
+        "spotify-user-123", "April Discoveries", public=False
+    )
+    mock_sp.playlist_add_items.assert_called_once_with(
+        "new-playlist-id", ["spotify:track:aaa", "spotify:track:bbb"]
+    )
+
+
+def test_handle_save_playlist_creation_error(monkeypatch):
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "someplaylist")
+    mock_sp = MagicMock()
+    mock_sp.user_playlist_create.side_effect = Exception("403 Forbidden")
+    with patch.object(music_discovery, "_get_spotify_client", return_value=mock_sp):
+        with patch.object(
+            music_discovery,
+            "_get_playlist_track_uris",
+            return_value=["spotify:track:aaa"],
+        ):
+            result = music_discovery.handle("music save Fail Playlist", "tom")
+    assert "Could not create playlist" in result["text"]
+    assert "403 Forbidden" in result["text"]
+
+
+def test_handle_save_add_tracks_error(monkeypatch):
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "someplaylist")
+    mock_sp = MagicMock()
+    mock_sp.me.return_value = {"id": "user123"}
+    mock_sp.user_playlist_create.return_value = {"id": "new-id"}
+    mock_sp.playlist_add_items.side_effect = Exception("500 Server Error")
+    with patch.object(music_discovery, "_get_spotify_client", return_value=mock_sp):
+        with patch.object(
+            music_discovery,
+            "_get_playlist_track_uris",
+            return_value=["spotify:track:aaa"],
+        ):
+            result = music_discovery.handle("music save Partial Save", "tom")
+    assert "could not add tracks" in result["text"].lower()
+
+
+def test_commands_include_save():
+    assert "music save" in music_discovery.commands
+
+
 def test_handle_deduplicates_uris(monkeypatch):
     """Duplicate Spotify URIs from different Last.fm tracks are deduplicated."""
     monkeypatch.setenv("LASTFM_USERNAME", "yerfatma")
