@@ -111,8 +111,10 @@ def test_fetch_mad_dog_raises_when_no_puzzles():
 
 # --- handle ---
 
+_PRINT_CAPS = frozenset({"print"})
 
-def test_handle_returns_pdf_url():
+
+def test_handle_returns_pdf_url_with_print_caps():
     with patch.object(
         cryptics,
         "_fetch_hex",
@@ -121,9 +123,25 @@ def test_handle_returns_pdf_url():
         with patch(
             "sandy.plugins.cryptics.random.choice", return_value=("Hex", cryptics._fetch_hex)
         ):
-            result = cryptics.handle("crossword", "tom")
+            result = cryptics.handle("crossword", "tom", caps=_PRINT_CAPS)
 
     assert result.get("pdf_url") == "https://example.com/p1.pdf"
+    assert "printer" in result["text"].lower()
+
+
+def test_handle_omits_pdf_without_print_caps():
+    with patch.object(
+        cryptics,
+        "_fetch_hex",
+        return_value=("https://example.com/p1", "https://example.com/p1.pdf"),
+    ):
+        with patch(
+            "sandy.plugins.cryptics.random.choice", return_value=("Hex", cryptics._fetch_hex)
+        ):
+            result = cryptics.handle("crossword", "alice")
+
+    assert "pdf_url" not in result
+    assert "Hex" in result["text"]
 
 
 def test_handle_includes_puzzle_link():
@@ -135,7 +153,7 @@ def test_handle_includes_puzzle_link():
         with patch(
             "sandy.plugins.cryptics.random.choice", return_value=("Hex", cryptics._fetch_hex)
         ):
-            result = cryptics.handle("crossword", "tom")
+            result = cryptics.handle("crossword", "tom", caps=_PRINT_CAPS)
 
     links = result.get("links", [])
     assert any("example.com/p1" in link.get("url", "") for link in links)

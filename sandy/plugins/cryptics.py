@@ -71,15 +71,19 @@ SOURCES = [
 ]
 
 
-def handle(text: str, actor: str) -> dict:
+def handle(text: str, actor: str, caps: frozenset[str] = frozenset()) -> dict:
     source_name, fetcher = random.choice(SOURCES)
     try:
         puzzle_page, pdf_url = fetcher()
     except Exception as e:
         return {"text": f"Couldn't fetch a crossword from {source_name}: {e}"}
 
-    return {
-        "text": f"Sending your crossword from {source_name} to the printer.",
-        "pdf_url": pdf_url,
+    response: dict = {
         "links": [{"label": f"View puzzle online ({source_name})", "url": puzzle_page}],
     }
+    if "print" in caps:
+        response["text"] = f"Sending your crossword from {source_name} to the printer."
+        response["pdf_url"] = pdf_url
+    else:
+        response["text"] = f"Here's a cryptic crossword from {source_name}."
+    return response
