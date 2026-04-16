@@ -185,6 +185,27 @@ active = "no"
 # DISPATCH_METAFRAMEWORK_DIR = "/path/to/metaframework"
 
 
+# ---- GIF Translator ----
+# Generational pop culture translator. Translates cultural references
+# for a target age group and finds matching GIFs via Giphy.
+# Command: "tr8 <phrase> [--age N]"
+[gif_translator]
+active = "yes"
+
+# Anthropic API key — required for Claude translation
+ANTHROPIC_API_KEY = "sk-ant-..."
+
+# Giphy API key — optional; without it, returns text suggestions only
+# Get a free key at https://developers.giphy.com/
+GIPHY_API_KEY = ""
+
+# Default target age for translations (override per-command with --age N)
+default_target_age = 28
+
+# Giphy content rating filter: g, pg, pg-13, r
+giphy_rating = "pg"
+
+
 # ---- Daemon Configuration ----
 # Controls which transports are active when running `sandy serve`
 [daemon]
