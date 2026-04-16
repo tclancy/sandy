@@ -21,7 +21,9 @@ def _fetch_hex() -> tuple[str, str]:
         raise ValueError("No puzzles found in Hex archive.")
     puzzle_id = random.choice(puzzle_ids)
     puzzle_page = f"https://coxrathvon.com/puzzles/{puzzle_id}"
-    pdf_response = requests.get(f"{puzzle_page}/pdf", timeout=10, allow_redirects=True)
+    pdf_response = requests.get(
+        f"{puzzle_page}/pdf?download=true", timeout=10, allow_redirects=True
+    )
     pdf_response.raise_for_status()
     return puzzle_page, pdf_response.url
 
@@ -54,7 +56,11 @@ def _fetch_mad_dog() -> tuple[str, str]:
         raise ValueError(f"Couldn't find PDF link for Mad Dog Cryptics #{number}.")
 
     puzzle_page = f"{_MAD_DOG_URL}#{number}"
-    return puzzle_page, pdf_match.group(1)
+    pdf_url = pdf_match.group(1)
+    # Dropbox preview URLs (?dl=0) return an HTML page, not the PDF.
+    # Switching to ?dl=1 triggers a direct file download.
+    pdf_url = re.sub(r"[?&]dl=0", lambda m: m.group(0).replace("dl=0", "dl=1"), pdf_url)
+    return puzzle_page, pdf_url
 
 
 # --- Sources registry ---
