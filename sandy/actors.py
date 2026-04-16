@@ -32,17 +32,21 @@ def resolve_actor(raw: str, config: dict) -> str | None:
     if not isinstance(actors, dict) or not actors:
         return raw
 
+    # Case-insensitive matching: Slack lowercases display names,
+    # CLI may pass mixed case, config may use either.
+    raw_lower = raw.lower()
+
     owner = get_owner(config)
-    if owner and raw == owner:
+    if owner and raw_lower == owner.lower():
         return owner
 
     for canonical, actor_config in actors.items():
         if not isinstance(actor_config, dict):
             continue
-        if canonical == raw:
+        if canonical.lower() == raw_lower:
             return canonical
         aliases = actor_config.get("aliases", [])
-        if isinstance(aliases, list) and raw in aliases:
+        if isinstance(aliases, list) and raw_lower in [a.lower() for a in aliases]:
             return canonical
 
     return None

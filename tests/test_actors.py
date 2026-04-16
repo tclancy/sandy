@@ -205,3 +205,26 @@ def test_caps_no_permissions_owner():
 def test_caps_no_permissions_non_owner():
     caps = resolve_caps("bob", {"sandy": {"owner": "tom"}})
     assert caps == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_case_insensitive():
+    assert resolve_actor("TClancy", MINIMAL_CONFIG) == "tom"
+    assert resolve_actor("TCLANCY", MINIMAL_CONFIG) == "tom"
+    assert resolve_actor("Tom", MINIMAL_CONFIG) == "tom"
+
+
+def test_resolve_alias_collision_with_canonical():
+    """If an alias matches another actor's canonical name, first match wins (insertion order)."""
+    config = {
+        "sandy": {"owner": "tom"},
+        "actors": {
+            "alice": {"aliases": ["bob"]},
+            "bob": {"aliases": []},
+        },
+    }
+    assert resolve_actor("bob", config) == "alice"

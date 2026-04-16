@@ -1,6 +1,8 @@
 # Sandy Changelog
 
 ## 2026-04-16
+- Feat #96: Actor model enforcement — identity resolution (`actors.py`), plugin-level permissions (public/private/allowed_actors), system-level action caps (print, cast). Unknown actors get "I don't know you" message. Cryptics omits print without cap; cast_to_tv rejects without cap. Backward compatible: no config = no enforcement. (411 tests, 86% coverage)
+- Feat #96: Renamed health plugin to help — backward-compat `health` command still works. Help output filtered by actor permissions.
 - Fix #104: cryptics PDF downloads — Cox & Rathvon `/pdf` endpoint now uses `?download=true` for raw file; Mad Dog Dropbox URLs rewritten from `dl=0` to `dl=1` for direct download instead of HTML preview (PR #105, 12 cryptics tests pass)
 
 ## 2026-04-09
