@@ -13,6 +13,48 @@
 # If a plugin has no section here, it is active by default.
 
 
+# ---- Sandy Core ----
+[sandy]
+owner = "your-canonical-name"       # CLI always resolves to this actor
+timezone = "America/New_York"
+
+
+# ---- Actor Identities ----
+# Map external identities (Slack display names, emails) to canonical names.
+# If no [actors] section exists, all actor checks are skipped (backward compat).
+[actors.your-name]
+aliases = ["your-slack-name", "your-email"]
+
+# [actors.friend]
+# aliases = ["friend-slack-name"]
+
+
+# ---- Permissions ----
+# default_access = "private" means new plugins are owner-only by default.
+# Per-plugin: access = "public" or allowed_actors = ["name"]
+[permissions]
+default_access = "private"
+
+[permissions.plugins.real_men]
+access = "public"
+
+[permissions.plugins.cryptics]
+access = "public"
+
+[permissions.plugins.sports]
+access = "public"
+
+[permissions.plugins.help]
+access = "public"
+
+# System-level action permissions
+[permissions.actions.print]
+actors = ["your-name"]
+
+[permissions.actions.cast]
+actors = ["your-name"]
+
+
 # ---- Global environment variables ----
 # These apply to all plugins.
 
@@ -134,9 +176,9 @@ YOUTUBE_TV_ADB_HOST = "192.168.1.xxx"
 # YOUTUBE_TV_ADB_PATH = "adb"
 
 
-# ---- Health Plugin ----
-# Built-in diagnostic — lists all active plugins and commands. No config needed.
-[health]
+# ---- Help Plugin ----
+# Built-in — lists commands available to the requesting actor. No config needed.
+[help]
 active = "yes"
 
 

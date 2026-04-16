@@ -63,15 +63,23 @@ import os  # noqa: E402  (needs to come after fixture definitions above)
 # ---------------------------------------------------------------------------
 
 
+_CAST_CAPS = frozenset({"cast"})
+
+
 def test_handle_cast_no_url():
-    result = cast_to_tv.handle("cast to tv", actor="tom")
+    result = cast_to_tv.handle("cast to tv", actor="tom", caps=_CAST_CAPS)
     assert result["title"] == "Cast to TV"
     assert "No URL found" in result["text"]
 
 
 def test_handle_cast_this_no_url():
-    result = cast_to_tv.handle("cast this please", actor="tom")
+    result = cast_to_tv.handle("cast this please", actor="tom", caps=_CAST_CAPS)
     assert "No URL found" in result["text"]
+
+
+def test_handle_cast_denied_without_caps():
+    result = cast_to_tv.handle("cast to tv https://example.com/video.mp4", actor="alice")
+    assert "permission" in result["text"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +103,7 @@ def test_handle_cast_url_success(monkeypatch):
         result = cast_to_tv.handle(
             "cast to tv https://example.com/movie.mp4",
             actor="tom",
+            caps=_CAST_CAPS,
         )
 
     assert result["title"] == "Cast to TV"
@@ -115,6 +124,7 @@ def test_handle_cast_url_with_progress(monkeypatch):
             "cast this https://example.com/stream.m3u8",
             actor="tom",
             progress=progress_calls.append,
+            caps=_CAST_CAPS,
         )
 
     assert any("Connecting" in c for c in progress_calls)
@@ -128,6 +138,7 @@ def test_handle_cast_url_strips_trailing_punctuation():
         cast_to_tv.handle(
             "cast to tv https://example.com/clip.mp4.",
             actor="tom",
+            caps=_CAST_CAPS,
         )
 
     played_url = cast.media_controller.play_media.call_args[0][0]
@@ -142,7 +153,9 @@ def test_handle_cast_url_strips_trailing_punctuation():
 
 def test_handle_cast_device_not_found():
     with patch.object(cast_to_tv, "_get_cast", side_effect=RuntimeError("No Chromecast found")):
-        result = cast_to_tv.handle("cast to tv https://example.com/video.mp4", actor="tom")
+        result = cast_to_tv.handle(
+            "cast to tv https://example.com/video.mp4", actor="tom", caps=_CAST_CAPS
+        )
 
     assert "No Chromecast found" in result["text"]
 
@@ -156,7 +169,7 @@ def test_handle_stop_casting_success():
     cast, browser = _make_mock_cast()
 
     with patch.object(cast_to_tv, "_get_cast", return_value=(cast, browser)):
-        result = cast_to_tv.handle("stop casting", actor="tom")
+        result = cast_to_tv.handle("stop casting", actor="tom", caps=_CAST_CAPS)
 
     assert "Stopped cast" in result["text"]
     cast.quit_app.assert_called_once()
@@ -164,7 +177,7 @@ def test_handle_stop_casting_success():
 
 def test_handle_stop_casting_device_not_found():
     with patch.object(cast_to_tv, "_get_cast", side_effect=RuntimeError("No Chromecast found")):
-        result = cast_to_tv.handle("stop casting", actor="tom")
+        result = cast_to_tv.handle("stop casting", actor="tom", caps=_CAST_CAPS)
 
     assert "No Chromecast found" in result["text"]
 
@@ -174,7 +187,9 @@ def test_handle_stop_casting_with_progress():
     progress_calls = []
 
     with patch.object(cast_to_tv, "_get_cast", return_value=(cast, browser)):
-        cast_to_tv.handle("stop casting", actor="tom", progress=progress_calls.append)
+        cast_to_tv.handle(
+            "stop casting", actor="tom", progress=progress_calls.append, caps=_CAST_CAPS
+        )
 
     assert any("Stopping" in c for c in progress_calls)
 

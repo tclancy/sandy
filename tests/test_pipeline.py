@@ -4,7 +4,7 @@ import textwrap
 from unittest.mock import MagicMock
 
 
-from sandy.pipeline import _accepts_progress, run_pipeline
+from sandy.pipeline import _accepts_caps, _accepts_progress, run_pipeline
 
 
 def _make_plugin(name, commands, handle_src):
@@ -184,3 +184,110 @@ def test_run_pipeline_no_progress_for_non_supporting_plugin():
     assert not reporter.called
     # but clear should still be called
     reporter.clear.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _accepts_caps
+# ---------------------------------------------------------------------------
+
+
+class _WithCaps:
+    name = "wc"
+    commands = ["test"]
+
+    def handle(self, text, actor, caps=frozenset()):
+        return "ok"
+
+
+class _WithoutCaps:
+    name = "nc"
+    commands = ["test"]
+
+    def handle(self, text, actor):
+        return "ok"
+
+
+def test_accepts_caps_true():
+    assert _accepts_caps(_WithCaps()) is True
+
+
+def test_accepts_caps_false():
+    assert _accepts_caps(_WithoutCaps()) is False
+
+
+# ---------------------------------------------------------------------------
+# run_pipeline — actor enforcement
+# ---------------------------------------------------------------------------
+
+_ACTOR_CONFIG = {
+    "sandy": {"owner": "tom"},
+    "actors": {
+        "tom": {"aliases": ["tclancy"]},
+        "alice": {"aliases": ["alice"]},
+    },
+    "permissions": {
+        "default_access": "private",
+        "plugins": {
+            "public_echo": {"access": "public"},
+        },
+        "actions": {
+            "print": {"actors": ["tom"]},
+        },
+    },
+}
+
+
+def test_unknown_actor_rejected():
+    plugin = _make_plugin("echo", ["hello"], "def handle(text, actor): return {'text': 'hi'}")
+    results, errors = run_pipeline("hello", "stranger", plugins=[plugin], config=_ACTOR_CONFIG)
+    assert len(results) == 1
+    assert results[0][0] == "sandy"
+    assert "don't know you" in results[0][1]["text"]
+    assert errors == []
+
+
+def test_owner_sees_private_plugin():
+    plugin = _make_plugin("secret", ["secret"], "def handle(text, actor): return {'text': 'ok'}")
+    results, errors = run_pipeline("secret", "tom", plugins=[plugin], config=_ACTOR_CONFIG)
+    assert len(results) == 1
+    assert results[0][0] == "secret"
+
+
+def test_non_owner_blocked_from_private_plugin():
+    plugin = _make_plugin("secret", ["secret"], "def handle(text, actor): return {'text': 'ok'}")
+    results, errors = run_pipeline("secret", "alice", plugins=[plugin], config=_ACTOR_CONFIG)
+    assert results == []
+    assert errors == []
+
+
+def test_non_owner_sees_public_plugin():
+    plugin = _make_plugin(
+        "public_echo", ["hello"], "def handle(text, actor): return {'text': 'hi'}"
+    )
+    results, errors = run_pipeline("hello", "alice", plugins=[plugin], config=_ACTOR_CONFIG)
+    assert len(results) == 1
+    assert results[0][0] == "public_echo"
+
+
+def test_caps_passed_to_plugin():
+    handle_src = textwrap.dedent("""
+        def handle(text, actor, caps=frozenset()):
+            return {'caps': list(caps)}
+    """)
+    plugin = _make_plugin("captest", ["cap"], handle_src)
+    results, errors = run_pipeline("cap", "tom", plugins=[plugin], config=_ACTOR_CONFIG)
+    assert "print" in results[0][1]["caps"]
+
+
+def test_caps_not_passed_when_not_accepted():
+    plugin = _make_plugin("nocap", ["go"], "def handle(text, actor): return {'text': 'ok'}")
+    results, errors = run_pipeline("go", "tom", plugins=[plugin], config=_ACTOR_CONFIG)
+    assert results[0][1] == {"text": "ok"}
+
+
+def test_backward_compat_no_config():
+    """Without actor/permission config, everything works as before."""
+    plugin = _make_plugin("echo", ["hello"], "def handle(text, actor): return 'hi'")
+    results, errors = run_pipeline("hello", "anyone", plugins=[plugin], config={})
+    assert len(results) == 1
+    assert results[0][1] == "hi"

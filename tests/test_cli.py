@@ -1,5 +1,7 @@
 import textwrap
 from unittest.mock import patch
+
+import sandy.config as config_module
 from sandy.cli import (
     _format_audio,
     _format_links,
@@ -176,7 +178,8 @@ def test_main_no_match(tmp_path, capsys):
     assert exit_code == 1
 
 
-def test_main_custom_actor(tmp_path, capsys):
+def test_main_custom_actor(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [])
     plugin_dir = _make_plugins(
         tmp_path,
         {
@@ -304,8 +307,9 @@ def test_main_timezone_short_flag(tmp_path, capsys):
     assert exit_code == 0
 
 
-def test_main_timezone_default_is_none(tmp_path, capsys):
-    """Without --timezone, tz defaults to None and pipeline uses config fallback."""
+def test_main_timezone_default_is_none(tmp_path, capsys, monkeypatch):
+    """Without --timezone and no config, tz defaults to None."""
+    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [])
     plugin_dir = _make_plugins(
         tmp_path,
         {

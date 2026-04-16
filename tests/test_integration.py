@@ -2,6 +2,8 @@
 
 import asyncio
 import textwrap
+
+import sandy.config as config_module
 from sandy.daemon import Daemon
 
 
@@ -15,8 +17,9 @@ def _make_dir(tmp_path, subdir, files):
     return str(d)
 
 
-def test_full_message_flow(tmp_path):
+def test_full_message_flow(tmp_path, monkeypatch):
     """Message arrives via transport, routes through pipeline, gets formatted response."""
+    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [])
     plugin_dir = _make_dir(
         tmp_path,
         "plugins",

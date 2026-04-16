@@ -21,7 +21,9 @@ def _fetch_hex() -> tuple[str, str]:
         raise ValueError("No puzzles found in Hex archive.")
     puzzle_id = random.choice(puzzle_ids)
     puzzle_page = f"https://coxrathvon.com/puzzles/{puzzle_id}"
-    pdf_response = requests.get(f"{puzzle_page}/pdf", timeout=10, allow_redirects=True)
+    pdf_response = requests.get(
+        f"{puzzle_page}/pdf?download=true", timeout=10, allow_redirects=True
+    )
     pdf_response.raise_for_status()
     return puzzle_page, pdf_response.url
 
@@ -54,7 +56,11 @@ def _fetch_mad_dog() -> tuple[str, str]:
         raise ValueError(f"Couldn't find PDF link for Mad Dog Cryptics #{number}.")
 
     puzzle_page = f"{_MAD_DOG_URL}#{number}"
-    return puzzle_page, pdf_match.group(1)
+    pdf_url = pdf_match.group(1)
+    # Dropbox preview URLs (?dl=0) return an HTML page, not the PDF.
+    # Switching to ?dl=1 triggers a direct file download.
+    pdf_url = re.sub(r"[?&]dl=0", lambda m: m.group(0).replace("dl=0", "dl=1"), pdf_url)
+    return puzzle_page, pdf_url
 
 
 # --- Sources registry ---
@@ -65,15 +71,19 @@ SOURCES = [
 ]
 
 
-def handle(text: str, actor: str) -> dict:
+def handle(text: str, actor: str, caps: frozenset[str] = frozenset()) -> dict:
     source_name, fetcher = random.choice(SOURCES)
     try:
         puzzle_page, pdf_url = fetcher()
     except Exception as e:
         return {"text": f"Couldn't fetch a crossword from {source_name}: {e}"}
 
-    return {
-        "text": f"Sending your crossword from {source_name} to the printer.",
-        "pdf_url": pdf_url,
+    response: dict = {
         "links": [{"label": f"View puzzle online ({source_name})", "url": puzzle_page}],
     }
+    if "print" in caps:
+        response["text"] = f"Sending your crossword from {source_name} to the printer."
+        response["pdf_url"] = pdf_url
+    else:
+        response["text"] = f"Here's a cryptic crossword from {source_name}."
+    return response
