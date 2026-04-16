@@ -90,7 +90,10 @@ def _cleanup(cast, browser) -> None:
         pass
 
 
-def handle(text: str, actor: str, progress=None) -> dict:
+def handle(text: str, actor: str, progress=None, caps: frozenset[str] = frozenset()) -> dict:
+    if "cast" not in caps:
+        return {"title": "Cast to TV", "text": "You don't have permission to cast to TV."}
+
     text_lower = text.lower().strip()
 
     # --- stop casting ---

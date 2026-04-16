@@ -1,5 +1,8 @@
 # Sandy Changelog
 
+## 2026-04-16
+- Fix #104: cryptics PDF downloads — Cox & Rathvon `/pdf` endpoint now uses `?download=true` for raw file; Mad Dog Dropbox URLs rewritten from `dl=0` to `dl=1` for direct download instead of HTML preview (PR #105, 12 cryptics tests pass)
+
 ## 2026-04-09
 
 - Feat #55: `printer status` Slack command — shows current SANDY_PRINTER value, IPP vs CUPS type, TCP connectivity test for IPP URIs, available CUPS queues, and auto-discovered IPP printers; enables full printer diagnosis without SSH (351 tests, 84.90% coverage)
