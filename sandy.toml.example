@@ -42,8 +42,16 @@ LASTFM_USERNAME       = "your-lastfm-username-here"
 
 SPOTIPY_CLIENT_ID     = "your-client-id-here"
 SPOTIPY_CLIENT_SECRET = "your-client-secret-here"
-SPOTIPY_REDIRECT_URI  = "http://127.0.0.1:8888/callback"
+# Set SPOTIPY_REDIRECT_URI to the public Cloudflare URL when running on homelab.
+# Register the same URL in your Spotify app's Redirect URIs settings.
+# For local dev: "http://127.0.0.1:8888/callback"
+SPOTIPY_REDIRECT_URI  = "https://sandy.tomclancy.info/callback"
 SPOTIFY_PLAYLIST_ID   = "your-playlist-id-here"
+
+# OAuth callback server — required for 'music login' to work headlessly.
+# Expose this port via Cloudflare tunnel so Spotify can redirect back.
+# Must match the port in SPOTIPY_REDIRECT_URI above.
+OAUTH_SERVER_PORT     = "8888"
 
 
 # ---- Spotify Plugin ----

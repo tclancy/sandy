@@ -458,6 +458,68 @@ def test_commands_include_save():
     assert "music save" in music_discovery.commands
 
 
+def test_commands_include_login():
+    assert "music login" in music_discovery.commands
+
+
+# ---------------------------------------------------------------------------
+# music login command
+# ---------------------------------------------------------------------------
+
+
+def test_handle_login_no_oauth_port(monkeypatch):
+    """login returns error when OAuth server is not configured."""
+    monkeypatch.delenv("OAUTH_SERVER_PORT", raising=False)
+    result = music_discovery.handle("music login", "tom")
+    assert "OAuth server is not running" in result["text"]
+
+
+def test_handle_login_no_redirect_uri(monkeypatch):
+    monkeypatch.setenv("OAUTH_SERVER_PORT", "8888")
+    monkeypatch.delenv("SPOTIPY_REDIRECT_URI", raising=False)
+    result = music_discovery.handle("music login", "tom")
+    assert "SPOTIPY_REDIRECT_URI" in result["text"]
+
+
+def test_handle_login_returns_auth_url(monkeypatch):
+    """login returns the authorization URL and registers pending oauth with a state token."""
+    monkeypatch.setenv("OAUTH_SERVER_PORT", "8888")
+    monkeypatch.setenv("SPOTIPY_REDIRECT_URI", "https://sandy.tomclancy.info/callback")
+
+    mock_manager = MagicMock()
+    mock_manager.get_authorize_url.return_value = "https://accounts.spotify.com/authorize?code=test"
+
+    with patch("sandy.plugins.music_discovery.SpotifyOAuth", return_value=mock_manager) as mock_cls:
+        with patch("sandy.plugins.music_discovery.oauth_server") as mock_oauth:
+            mock_oauth.get_configured_port.return_value = 8888
+            mock_oauth.set_pending_oauth = MagicMock()
+
+            result = music_discovery.handle("music login", "tom")
+
+    assert result["title"] == "Spotify Login"
+    assert "links" in result
+    assert "accounts.spotify.com" in result["links"][0]["url"]
+    # SpotifyOAuth must be constructed with a state= argument (CSRF protection)
+    _, kwargs = mock_cls.call_args
+    assert "state" in kwargs and kwargs["state"], "SpotifyOAuth must receive a non-empty state"
+    # set_pending_oauth must be called with both the manager and the same state value
+    mock_oauth.set_pending_oauth.assert_called_once_with(mock_manager, kwargs["state"])
+
+
+def test_handle_login_auth_manager_creation_failure(monkeypatch):
+    """If SpotifyOAuth construction fails, return an error."""
+    monkeypatch.setenv("OAUTH_SERVER_PORT", "8888")
+    monkeypatch.setenv("SPOTIPY_REDIRECT_URI", "https://sandy.tomclancy.info/callback")
+
+    with patch("sandy.plugins.music_discovery.SpotifyOAuth", side_effect=Exception("bad creds")):
+        with patch("sandy.plugins.music_discovery.oauth_server") as mock_oauth:
+            mock_oauth.get_configured_port.return_value = 8888
+
+            result = music_discovery.handle("music login", "tom")
+
+    assert "Could not create Spotify auth manager" in result["text"]
+
+
 def test_handle_deduplicates_uris(monkeypatch):
     """Duplicate Spotify URIs from different Last.fm tracks are deduplicated."""
     monkeypatch.setenv("LASTFM_USERNAME", "yerfatma")
