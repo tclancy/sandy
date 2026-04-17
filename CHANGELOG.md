@@ -5,6 +5,11 @@
 - Feat #96: Renamed health plugin to help — backward-compat `health` command still works. Help output filtered by actor permissions.
 - Fix #104: cryptics PDF downloads — Cox & Rathvon `/pdf` endpoint now uses `?download=true` for raw file; Mad Dog Dropbox URLs rewritten from `dl=0` to `dl=1` for direct download instead of HTML preview (PR #105, 12 cryptics tests pass)
 
+## 2026-04-15
+- Feat #101: `music login` Slack command — generates Spotify authorization URL with CSRF state token, sends via Slack; user clicks to re-auth; Sandy's new aiohttp OAuth callback server (port 8888, `OAUTH_SERVER_PORT`) handles the redirect and exchanges the code for a token automatically; CSRF state validated on callback; error responses HTML-escaped (XSS-safe); 387 tests, 85% coverage (PR #103)
+- Feat #101: `sandy/oauth_server.py` — aiohttp HTTP server running as asyncio task alongside Slack transport; `/callback` for Spotify OAuth, `/health` for tunnel verification; started by daemon when `OAUTH_SERVER_PORT` env var is set
+- Config: `sandy.toml.example` updated with `OAUTH_SERVER_PORT` and correct Cloudflare redirect URI; homelab `vars.yml` updated (`sandy.tomclancy.info/callback` redirect URI, port 8888); `sandy-environment.j2` template updated
+
 ## 2026-04-09
 
 - Feat #55: `printer status` Slack command — shows current SANDY_PRINTER value, IPP vs CUPS type, TCP connectivity test for IPP URIs, available CUPS queues, and auto-discovered IPP printers; enables full printer diagnosis without SSH (351 tests, 84.90% coverage)

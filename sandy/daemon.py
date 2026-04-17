@@ -11,6 +11,7 @@ import sentry_sdk
 
 from sandy.config import apply_env, find_config_path, load_config
 from sandy.loader import load_plugins
+from sandy import oauth_server
 from sandy.pipeline import run_pipeline
 from sandy.printer import _DEFAULT_PRINTER, _is_ipp_uri, print_pdf
 from sandy.progress import QueueProgressReporter
@@ -197,6 +198,11 @@ class Daemon:
             logger.info("Transport '%s' started", transport.name)
         tasks.append(asyncio.create_task(self._watch_plugins()))
         logger.info("Plugin watcher started (polling every %.1fs)", _RELOAD_INTERVAL)
+
+        oauth_port = oauth_server.get_configured_port()
+        if oauth_port:
+            tasks.append(asyncio.create_task(oauth_server.run_server(oauth_port)))
+            logger.info("OAuth callback server task started on port %d", oauth_port)
 
         await stop_event.wait()
         logger.info("Shutting down...")

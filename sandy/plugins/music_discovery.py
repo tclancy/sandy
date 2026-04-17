@@ -16,15 +16,18 @@ Required environment variables (set via [music_discovery] in sandy.toml):
 
 import logging
 import os
+import secrets
 
 import pylast
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
+from sandy import oauth_server
+
 logger = logging.getLogger(__name__)
 
 name = "music_discovery"
-commands = ["find me new music", "discover music", "new music", "music save"]
+commands = ["find me new music", "discover music", "new music", "music save", "music login"]
 
 # How many of the user's top artists to seed from
 TOP_ARTISTS_LIMIT = 10
@@ -283,6 +286,56 @@ def _handle_discover(username: str, playlist_id: str, progress=None) -> dict:
     }
 
 
+def _handle_login() -> dict:
+    """Handle the 'music login' command.
+
+    Generates a Spotify authorization URL and registers the SpotifyOAuth
+    manager with Sandy's OAuth callback server so the callback can complete
+    the token exchange automatically.
+
+    Requires:
+      - OAUTH_SERVER_PORT set in environment (OAuth callback server running)
+      - SPOTIPY_REDIRECT_URI pointing at the public callback URL, e.g.
+          https://sandy.tomclancy.info/callback
+      - That URL registered in the Spotify app's "Redirect URIs" settings
+    """
+    oauth_port = oauth_server.get_configured_port()
+    if not oauth_port:
+        return {
+            "text": (
+                "OAuth server is not running. "
+                "Set OAUTH_SERVER_PORT in sandy.toml and restart Sandy."
+            )
+        }
+
+    redirect_uri = os.environ.get("SPOTIPY_REDIRECT_URI", "")
+    if not redirect_uri:
+        return {"text": "SPOTIPY_REDIRECT_URI is not configured."}
+
+    state = secrets.token_urlsafe(16)
+    try:
+        auth_manager = SpotifyOAuth(
+            scope="playlist-modify-public playlist-modify-private",
+            state=state,
+        )
+    except Exception as e:
+        return {"text": f"Could not create Spotify auth manager: {e}"}
+
+    auth_url = auth_manager.get_authorize_url()
+    oauth_server.set_pending_oauth(auth_manager, state)
+    logger.info("Spotify login flow started; authorization URL generated")
+
+    return {
+        "title": "Spotify Login",
+        "text": (
+            "Click the link below to authorize Sandy with Spotify. "
+            "Once you approve, the token will be saved automatically "
+            "and music discovery will work again."
+        ),
+        "links": [{"label": "Authorize Sandy on Spotify", "url": auth_url}],
+    }
+
+
 def handle(text: str, actor: str, progress=None) -> dict:
     """Discover new music, or save the current discovery playlist.
 
@@ -291,6 +344,9 @@ def handle(text: str, actor: str, progress=None) -> dict:
       music save <playlist_name> — copy current discovery playlist to a new named playlist
     """
     playlist_id = os.environ.get("SPOTIFY_PLAYLIST_ID", "")
+
+    if "music login" in text.lower():
+        return _handle_login()
 
     if "music save" in text.lower():
         return _handle_save(text, playlist_id)
