@@ -16,7 +16,7 @@ tools (itguy for deploys, estimatedtaxes for tax tracking) live as sibling repos
 
 ```
 homelab.local (/home/tom/sources/)
-├── rpi/         Ansible playbooks (connection: local)
+├── homelab/         Ansible playbooks (connection: local)
 ├── sandy/       Orchestrator — systemd service, plugins, Slack transport
 ├── itguy/       Deploy engine — Ansible + git-pull strategies
 └── irs/         1099 tax tracking CLI (estimatedtaxes)
