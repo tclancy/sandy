@@ -356,6 +356,20 @@ def test_handle_invalid_json_from_claude(mock_translate, monkeypatch):
 
 @patch("sandy.plugins.gif_translator._search_giphy")
 @patch("sandy.plugins.gif_translator._translate_reference")
+def test_handle_uses_giphy_rating_env(mock_translate, mock_giphy, monkeypatch):
+    monkeypatch.setenv("GIPHY_API_KEY", "test-giphy-key")
+    monkeypatch.setenv("GIF_GIPHY_RATING", "r")
+    mock_translate.return_value = SAMPLE_TRANSLATION
+    mock_giphy.return_value = None
+
+    gif_translator.handle("tr8 test", "tom")
+
+    for call in mock_giphy.call_args_list:
+        assert call[0][2] == "r"
+
+
+@patch("sandy.plugins.gif_translator._search_giphy")
+@patch("sandy.plugins.gif_translator._translate_reference")
 def test_handle_progress_callback(mock_translate, mock_giphy, monkeypatch):
     monkeypatch.setenv("GIPHY_API_KEY", "test-giphy-key")
     mock_translate.return_value = SAMPLE_TRANSLATION

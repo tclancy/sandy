@@ -15,14 +15,14 @@
 
 # ---- Sandy Core ----
 [sandy]
-owner = "your-canonical-name"       # CLI always resolves to this actor
+owner = "your-canonical-name"  # CLI always resolves to this actor
 timezone = "America/New_York"
 
 
 # ---- Actor Identities ----
 # Map external identities (Slack display names, emails) to canonical names.
 # If no [actors] section exists, all actor checks are skipped (backward compat).
-[actors.your-name]
+[actors.your - name]
 aliases = ["your-slack-name", "your-email"]
 
 # [actors.friend]
@@ -78,14 +78,14 @@ actors = ["your-name"]
 [music_discovery]
 active = "yes"
 
-LASTFM_API_KEY        = "your-lastfm-api-key-here"
-LASTFM_API_SECRET     = "your-lastfm-api-secret-here"
-LASTFM_USERNAME       = "your-lastfm-username-here"
+LASTFM_API_KEY = "your-lastfm-api-key-here"
+LASTFM_API_SECRET = "your-lastfm-api-secret-here"
+LASTFM_USERNAME = "your-lastfm-username-here"
 
-SPOTIPY_CLIENT_ID     = "your-client-id-here"
+SPOTIPY_CLIENT_ID = "your-client-id-here"
 SPOTIPY_CLIENT_SECRET = "your-client-secret-here"
-SPOTIPY_REDIRECT_URI  = "http://127.0.0.1:8888/callback"
-SPOTIFY_PLAYLIST_ID   = "your-playlist-id-here"
+SPOTIPY_REDIRECT_URI = "http://127.0.0.1:8888/callback"
+SPOTIFY_PLAYLIST_ID = "your-playlist-id-here"
 
 
 # ---- Spotify Plugin ----
@@ -93,9 +93,9 @@ SPOTIFY_PLAYLIST_ID   = "your-playlist-id-here"
 [spotify]
 active = "no"
 
-SPOTIPY_CLIENT_ID     = "your-client-id-here"
+SPOTIPY_CLIENT_ID = "your-client-id-here"
 SPOTIPY_CLIENT_SECRET = "your-client-secret-here"
-SPOTIPY_REDIRECT_URI  = "http://127.0.0.1:8888/callback"
+SPOTIPY_REDIRECT_URI = "http://127.0.0.1:8888/callback"
 
 
 # ---- Cryptics Plugin ----
@@ -132,7 +132,7 @@ FOOTBALL_DATA_API_KEY = "your-key-here"
 [estimatedtaxes]
 active = "yes"
 
-ATEAM_EMAIL    = "your-ateam-email-here"
+ATEAM_EMAIL = "your-ateam-email-here"
 ATEAM_PASSWORD = "your-ateam-password-here"
 
 
@@ -151,7 +151,7 @@ active = "yes"
 # Friendly name of the Chromecast device (run the plugin to see discovered names)
 CAST_DEVICE_NAME = "Living Room TV"
 # Seconds to wait for device discovery
-CAST_TIMEOUT     = "10"
+CAST_TIMEOUT = "10"
 
 
 # ---- YouTube TV Plugin ----
@@ -200,10 +200,10 @@ ANTHROPIC_API_KEY = "sk-ant-..."
 GIPHY_API_KEY = ""
 
 # Default target age for translations (override per-command with --age N)
-default_target_age = 28
+GIF_DEFAULT_TARGET_AGE = "28"
 
 # Giphy content rating filter: g, pg, pg-13, r
-giphy_rating = "pg"
+GIF_GIPHY_RATING = "pg"
 
 
 # ---- Daemon Configuration ----
