@@ -10,7 +10,7 @@ dependencies = [
     "spotipy>=2.26.0",
     "pylast>=7.0.2",
     "pychromecast>=14.0.10",
-    "sentry-sdk>=2.58.0",
+    "sentry-sdk>=2.59.0",
 ]
 
 [tool.pytest.ini_options]
