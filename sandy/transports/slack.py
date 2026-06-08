@@ -159,8 +159,10 @@ async def listen(callback):
             formatted = format_response(plugin_name, response)
             logger.debug("Sending reply for '%s': %d blocks", plugin_name, len(formatted["blocks"]))
             await say(blocks=formatted["blocks"])
-            handling = time.time() - received_at
-            logger.info("Reply sent for plugin '%s' (handled in %.2fs)", plugin_name, handling)
+            # receipt→reply spans the pipeline AND any uncached users_info call,
+            # so it is not pure Sandy compute — label it as the full span.
+            elapsed = time.time() - received_at
+            logger.info("Reply sent for plugin '%s' (receipt→reply %.2fs)", plugin_name, elapsed)
 
         await callback(text, actor, reply_fn, tz=actor_tz)
 
