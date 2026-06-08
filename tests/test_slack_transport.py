@@ -1,6 +1,6 @@
 """Tests for Slack transport plugin."""
 
-from sandy.transports.slack import format_response
+from sandy.transports.slack import format_response, inbound_lag_seconds
 
 
 def test_format_response_text_only():
@@ -110,3 +110,35 @@ def test_format_response_multiple_links():
     assert "Second" in text
     assert "https://example.com/1" in text
     assert "https://example.com/2" in text
+
+
+# --- inbound latency instrumentation (issue #119) ---
+
+
+def test_inbound_lag_seconds_basic():
+    """Lag is now minus the Slack message post time (event 'ts')."""
+    event = {"ts": "1000.000000"}
+    assert inbound_lag_seconds(event, now=1002.5) == 2.5
+
+
+def test_inbound_lag_seconds_subsecond():
+    """Sub-second lag is preserved (not rounded to int)."""
+    event = {"ts": "1000.000000"}
+    lag = inbound_lag_seconds(event, now=1000.25)
+    assert abs(lag - 0.25) < 1e-9
+
+
+def test_inbound_lag_seconds_missing_ts():
+    """A missing 'ts' yields None rather than raising — never break message handling."""
+    assert inbound_lag_seconds({}, now=1000.0) is None
+
+
+def test_inbound_lag_seconds_unparseable_ts():
+    """A non-numeric 'ts' yields None rather than raising."""
+    assert inbound_lag_seconds({"ts": "not-a-number"}, now=1000.0) is None
+
+
+def test_inbound_lag_seconds_negative_clamped_to_zero():
+    """Clock skew (event ts ahead of now) clamps to 0, never negative."""
+    event = {"ts": "1000.000000"}
+    assert inbound_lag_seconds(event, now=999.0) == 0.0

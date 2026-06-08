@@ -6,10 +6,32 @@ routes text through Sandy's pipeline, replies with Block Kit formatted messages.
 
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
 name = "slack"
+
+
+def inbound_lag_seconds(event: dict, now: float) -> float | None:
+    """Seconds between Slack posting a message and Sandy receiving it.
+
+    Slack stamps every message event with ``ts`` (epoch-seconds string).
+    Comparing it to wall-clock receipt time isolates network/Slack-delivery
+    latency from Sandy's own (already sub-second) processing — the missing
+    measurement in issue #119.
+
+    Returns None when ``ts`` is absent or unparseable so instrumentation can
+    never break message handling. Clock skew is clamped to 0.
+    """
+    ts = event.get("ts")
+    if ts is None:
+        return None
+    try:
+        posted_at = float(ts)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, now - posted_at)
 
 
 def _get_tokens() -> tuple[str, str]:
@@ -91,6 +113,7 @@ async def listen(callback):
 
     @app.event("message")
     async def handle_message(event, say):
+        received_at = time.time()
         logger.debug("Raw Slack event received: %s", event)
         text = event.get("text", "").strip()
         if not text:
@@ -105,7 +128,14 @@ async def listen(callback):
 
         user_id = event.get("user", "unknown")
         actor = user_id
-        logger.info("Message from user=%s: '%s'", actor, text)
+
+        lag = inbound_lag_seconds(event, received_at)
+        if lag is None:
+            logger.info("Message from user=%s: '%s'", actor, text)
+        else:
+            logger.info(
+                "Message from user=%s: '%s' (Slack→Sandy delivery lag %.2fs)", actor, text, lag
+            )
 
         # Fetch display name and timezone from Slack (cached per user ID)
         actor_tz: str | None = None
@@ -129,7 +159,10 @@ async def listen(callback):
             formatted = format_response(plugin_name, response)
             logger.debug("Sending reply for '%s': %d blocks", plugin_name, len(formatted["blocks"]))
             await say(blocks=formatted["blocks"])
-            logger.info("Reply sent for plugin '%s'", plugin_name)
+            # receipt→reply spans the pipeline AND any uncached users_info call,
+            # so it is not pure Sandy compute — label it as the full span.
+            elapsed = time.time() - received_at
+            logger.info("Reply sent for plugin '%s' (receipt→reply %.2fs)", plugin_name, elapsed)
 
         await callback(text, actor, reply_fn, tz=actor_tz)
 
