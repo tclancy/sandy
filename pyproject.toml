@@ -5,12 +5,12 @@ description = "CLI tool that routes text commands to plugins"
 requires-python = ">=3.13"
 dependencies = [
     "requests>=2.34.2",
-    "aiohttp>=3.14.0",
+    "aiohttp>=3.14.1",
     "slack-bolt>=1.28.0",
     "spotipy>=2.26.0",
     "pylast>=7.0.2",
     "pychromecast>=14.0.10",
-    "sentry-sdk>=2.61.1",
+    "sentry-sdk>=2.62.0",
 ]
 
 [tool.pytest.ini_options]
@@ -42,7 +42,7 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.15",
+    "ruff>=0.15.16",
     "pre-commit>=4.6.0",
     "pytest-asyncio>=1.4.0",
 ]
