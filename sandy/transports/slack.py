@@ -6,6 +6,7 @@ routes text through Sandy's pipeline, replies with Block Kit formatted messages.
 
 import logging
 import os
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -45,8 +46,48 @@ def _get_tokens() -> tuple[str, str]:
     return app_token, bot_token
 
 
+# Matches a string whose entire body is wrapped in mrkdwn triple-backtick fences:
+# leading ```, a newline, the payload, a newline, and a trailing ```. The (?s) flag
+# lets the payload contain newlines.  Used to auto-promote legacy plugin responses
+# that pre-wrap their text in ``` fences — those fences render unreliably in Slack
+# (the section.text 3000-char cap can truncate the closing fence, and embedded
+# backticks in the payload close the outer fence early). Promoting them to a
+# rich_text_preformatted block sidesteps both failure modes (#122).
+_FENCED_RE = re.compile(r"(?s)\A```\n(.*)\n```\Z")
+
+# rich_text_preformatted has no documented hard cap, but cap at 12000 to stay well
+# under Slack's overall block-payload limits and avoid an API-rejection failure mode.
+_CODE_TEXT_CAP = 12000
+
+
+def _rich_text_preformatted_block(text: str) -> dict:
+    """Render *text* as a Slack rich_text_preformatted block (Slack's first-class code block)."""
+    return {
+        "type": "rich_text",
+        "elements": [
+            {
+                "type": "rich_text_preformatted",
+                "elements": [{"type": "text", "text": text[:_CODE_TEXT_CAP]}],
+            }
+        ],
+    }
+
+
 def format_response(plugin_name: str, response: dict) -> dict:
-    """Translate a content plugin response dict into Slack Block Kit blocks."""
+    """Translate a content plugin response dict into Slack Block Kit blocks.
+
+    Recognised response keys:
+      title, text, code_text, links, image_url.
+
+    ``code_text`` is rendered as a Slack ``rich_text_preformatted`` block — the
+    parser-safe equivalent of a Markdown code fence. Prefer this over wrapping
+    ``text`` in triple backticks: mrkdwn fences are unreliable for long output
+    (truncated closing fence) or content containing backticks (#122).
+
+    Legacy plugins that pre-wrap ``text`` in triple-backtick fences are
+    auto-promoted to a ``rich_text_preformatted`` block so the fix lands
+    before every plugin is updated.
+    """
     logger.debug("Formatting response for plugin '%s': keys=%s", plugin_name, list(response.keys()))
     blocks = []
 
@@ -58,11 +99,24 @@ def format_response(plugin_name: str, response: dict) -> dict:
             }
         )
 
-    if "text" in response:
+    code_text = response.get("code_text")
+    text = response.get("text")
+
+    # Auto-promote legacy responses whose text is entirely wrapped in ``` fences.
+    if code_text is None and isinstance(text, str):
+        match = _FENCED_RE.match(text)
+        if match:
+            code_text = match.group(1)
+            text = None
+
+    if isinstance(code_text, str) and code_text:
+        blocks.append(_rich_text_preformatted_block(code_text))
+
+    if isinstance(text, str):
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": response["text"][:3000]},
+                "text": {"type": "mrkdwn", "text": text[:3000]},
             }
         )
 

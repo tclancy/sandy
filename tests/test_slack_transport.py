@@ -115,6 +115,94 @@ def test_format_response_multiple_links():
 # --- inbound latency instrumentation (issue #119) ---
 
 
+def _rich_text_blocks(blocks):
+    """Helper: return the rich_text_preformatted text payloads from a block list."""
+    out = []
+    for b in blocks:
+        if b.get("type") != "rich_text":
+            continue
+        for el in b.get("elements", []):
+            if el.get("type") == "rich_text_preformatted":
+                out.append("".join(sub.get("text", "") for sub in el.get("elements", [])))
+    return out
+
+
+def test_format_response_code_text_renders_rich_text_preformatted():
+    """The code_text field renders as a Slack rich_text_preformatted block (#122)."""
+    result = format_response("itguy", {"title": "IT Guy", "code_text": "log line 1\nlog line 2"})
+    blocks = result["blocks"]
+    code_blocks = _rich_text_blocks(blocks)
+    assert code_blocks == ["log line 1\nlog line 2"]
+    # The rich_text block is parser-safe — content is not wrapped in markdown fences.
+    assert all("```" not in t for t in code_blocks)
+
+
+def test_format_response_code_text_alongside_text():
+    """code_text and text coexist: code first (rich_text), then mrkdwn section."""
+    result = format_response(
+        "itguy",
+        {"code_text": "code body", "text": "human commentary"},
+    )
+    blocks = result["blocks"]
+    code_blocks = _rich_text_blocks(blocks)
+    section_texts = [b["text"]["text"] for b in blocks if b.get("type") == "section"]
+    assert "code body" in code_blocks
+    assert any("human commentary" in t for t in section_texts)
+
+
+def test_format_response_legacy_fenced_text_auto_promoted():
+    """Legacy plugin that wraps text in ``` is auto-promoted to rich_text_preformatted.
+
+    This is the backward-compat path that fixes #122 even for plugins not yet updated.
+    """
+    legacy = "```\nfoo bar\nbaz\n```"
+    result = format_response("legacy", {"title": "Old plugin", "text": legacy})
+    blocks = result["blocks"]
+    code_blocks = _rich_text_blocks(blocks)
+    assert code_blocks == ["foo bar\nbaz"]
+    # No raw mrkdwn section with literal backticks left behind.
+    sections = [b for b in blocks if b.get("type") == "section"]
+    assert not any("```" in b["text"]["text"] for b in sections)
+
+
+def test_format_response_partial_fenced_text_not_promoted():
+    """Text that only opens a fence (e.g. truncated) is left as mrkdwn — promotion
+    requires a full ``` ... ``` wrap, not just a stray opener."""
+    result = format_response("test", {"text": "```\nincomplete output"})
+    blocks = result["blocks"]
+    code_blocks = _rich_text_blocks(blocks)
+    assert code_blocks == []
+    sections = [b for b in blocks if b.get("type") == "section"]
+    assert any("incomplete output" in b["text"]["text"] for b in sections)
+
+
+def test_format_response_inline_fence_in_text_not_promoted():
+    """A fence that's not the whole message (e.g. text + fence + more text) is not promoted."""
+    mixed = "Heads up:\n```\nstuff\n```\nthat's all"
+    result = format_response("test", {"text": mixed})
+    code_blocks = _rich_text_blocks(result["blocks"])
+    assert code_blocks == []  # mixed content stays as mrkdwn
+
+
+def test_format_response_code_text_truncated():
+    """code_text longer than the cap is truncated, not rejected."""
+    long_code = "x" * 20000
+    result = format_response("test", {"code_text": long_code})
+    code_blocks = _rich_text_blocks(result["blocks"])
+    assert len(code_blocks) == 1
+    assert len(code_blocks[0]) == 12000
+
+
+def test_format_response_code_text_empty_skipped():
+    """Empty code_text produces no rich_text block (avoids empty Slack payloads)."""
+    result = format_response("test", {"code_text": "", "text": "fallback"})
+    code_blocks = _rich_text_blocks(result["blocks"])
+    assert code_blocks == []
+    # text still renders
+    sections = [b for b in result["blocks"] if b.get("type") == "section"]
+    assert any("fallback" in b["text"]["text"] for b in sections)
+
+
 def test_inbound_lag_seconds_basic():
     """Lag is now minus the Slack message post time (event 'ts')."""
     event = {"ts": "1000.000000"}
