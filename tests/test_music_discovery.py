@@ -218,6 +218,47 @@ def test_handle_spotify_auth_failure(monkeypatch):
     assert "Spotify auth failed" in result["text"]
 
 
+def test_handle_spotify_auth_failure_reports_to_sentry(monkeypatch, sentry_events):
+    monkeypatch.setenv("LASTFM_USERNAME", "yerfatma")
+    monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "someplaylist")
+    with patch.object(music_discovery, "_get_lastfm_network"):
+        with patch.object(music_discovery, "_get_top_artists", return_value=["Radiohead"]):
+            with patch.object(
+                music_discovery,
+                "_collect_candidate_tracks",
+                return_value=[("Mogwai", "Friend of the Night")],
+            ):
+                with patch.object(
+                    music_discovery,
+                    "_get_spotify_client",
+                    side_effect=RuntimeError("no credentials"),
+                ):
+                    music_discovery.handle("find me new music", "tom")
+    assert len(sentry_events) == 1
+    assert sentry_events[0]["tags"]["plugin"] == "music_discovery"
+
+
+def test_save_playlist_source_read_failure_reports_to_sentry(sentry_events):
+    mock_sp = MagicMock()
+    with patch.object(
+        music_discovery, "_get_playlist_track_uris", side_effect=RuntimeError("api down")
+    ):
+        result = music_discovery._save_playlist(mock_sp, "src-id", "New Mix")
+    assert "Could not read source playlist" in result["text"]
+    assert len(sentry_events) == 1
+    assert sentry_events[0]["tags"]["plugin"] == "music_discovery"
+
+
+def test_handle_login_auth_manager_failure_reports_to_sentry(monkeypatch, sentry_events):
+    monkeypatch.setenv("SPOTIPY_REDIRECT_URI", "https://sandy.example/callback")
+    with patch.object(music_discovery.oauth_server, "get_configured_port", return_value=8080):
+        with patch.object(music_discovery, "SpotifyOAuth", side_effect=RuntimeError("bad config")):
+            result = music_discovery.handle("music login", "tom")
+    assert "Could not create Spotify auth manager" in result["text"]
+    assert len(sentry_events) == 1
+    assert sentry_events[0]["tags"]["plugin"] == "music_discovery"
+
+
 def test_handle_no_spotify_uris(monkeypatch):
     monkeypatch.setenv("LASTFM_USERNAME", "yerfatma")
     monkeypatch.setenv("SPOTIFY_PLAYLIST_ID", "someplaylist")

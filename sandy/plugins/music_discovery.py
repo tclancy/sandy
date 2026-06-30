@@ -23,6 +23,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
 from sandy import oauth_server
+from sandy.observability import capture
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,7 @@ def _save_playlist(sp: spotipy.Spotify, source_playlist_id: str, new_name: str) 
         uris = _get_playlist_track_uris(sp, source_playlist_id)
     except Exception as e:
         logger.exception("Failed to fetch tracks from source playlist")
+        capture(e, plugin="music_discovery", stage="read_source")
         return {"text": f"Could not read source playlist: {e}"}
 
     if not uris:
@@ -204,6 +206,7 @@ def _save_playlist(sp: spotipy.Spotify, source_playlist_id: str, new_name: str) 
         new_playlist_id = new_playlist["id"]
     except Exception as e:
         logger.exception("Failed to create new Spotify playlist")
+        capture(e, plugin="music_discovery", stage="create_playlist")
         return {"text": f"Could not create playlist '{new_name}': {e}"}
 
     _CHUNK = 100
@@ -212,6 +215,7 @@ def _save_playlist(sp: spotipy.Spotify, source_playlist_id: str, new_name: str) 
             sp.playlist_add_items(new_playlist_id, uris[i : i + _CHUNK])
     except Exception as e:
         logger.exception("Failed to add tracks to new playlist")
+        capture(e, plugin="music_discovery", stage="add_tracks")
         return {"text": f"Created '{new_name}' but could not add tracks: {e}"}
 
     new_url = f"https://open.spotify.com/playlist/{new_playlist_id}"
@@ -234,6 +238,7 @@ def _handle_save(text: str, playlist_id: str) -> dict:
     try:
         sp = _get_spotify_client()
     except Exception as e:
+        capture(e, plugin="music_discovery", stage="auth")
         return {"text": f"Spotify auth failed: {e}"}
     return _save_playlist(sp, playlist_id, new_name)
 
@@ -247,6 +252,7 @@ def _handle_discover(username: str, playlist_id: str, progress=None) -> dict:
     try:
         sp = _get_spotify_client()
     except Exception as e:
+        capture(e, plugin="music_discovery", stage="auth")
         return {"text": f"Spotify auth failed: {e}"}
 
     uris = _resolve_spotify_uris(sp, candidates, progress=progress)
@@ -263,6 +269,7 @@ def _handle_discover(username: str, playlist_id: str, progress=None) -> dict:
         sp.playlist_replace_items(playlist_id, [])
     except Exception as e:
         logger.exception("Spotify clear step failed")
+        capture(e, plugin="music_discovery", stage="clear")
         return {"text": f"Spotify playlist update failed (could not clear): {e}"}
 
     _CHUNK = 100
@@ -271,6 +278,7 @@ def _handle_discover(username: str, playlist_id: str, progress=None) -> dict:
             sp.playlist_add_items(playlist_id, uris[i : i + _CHUNK])
     except Exception as e:
         logger.exception("Spotify add step failed after playlist was cleared")
+        capture(e, plugin="music_discovery", stage="add_tracks")
         return {
             "text": (
                 f"Spotify playlist update failed (could not add tracks): {e}. "
@@ -319,6 +327,7 @@ def _handle_login() -> dict:
             state=state,
         )
     except Exception as e:
+        capture(e, plugin="music_discovery", stage="login")
         return {"text": f"Could not create Spotify auth manager: {e}"}
 
     auth_url = auth_manager.get_authorize_url()

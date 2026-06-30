@@ -32,6 +32,14 @@ def test_handle_auth_failure():
     assert "auth failed" in result["text"].lower()
 
 
+def test_handle_auth_failure_reports_to_sentry(sentry_events):
+    with patch.object(spotify, "_get_spotify_client", side_effect=RuntimeError("no credentials")):
+        spotify.handle("find me new music", "tom")
+    assert len(sentry_events) == 1
+    assert sentry_events[0]["tags"]["plugin"] == "spotify"
+    assert "exception" in sentry_events[0]
+
+
 def test_handle_no_followed_artists():
     with patch.object(spotify, "_get_spotify_client"):
         with patch.object(spotify, "_get_followed_artists", return_value=[]):

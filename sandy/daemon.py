@@ -7,11 +7,10 @@ import signal
 import sys
 from pathlib import Path
 
-import sentry_sdk
-
 from sandy.config import apply_env, find_config_path, load_config
 from sandy.loader import load_plugins
 from sandy import oauth_server
+from sandy.observability import init_sentry, status_message
 from sandy.pipeline import run_pipeline
 from sandy.printer import _DEFAULT_PRINTER, _is_ipp_uri, print_pdf
 from sandy.progress import QueueProgressReporter
@@ -19,17 +18,12 @@ from sandy.transport_loader import load_transports
 
 logger = logging.getLogger(__name__)
 
-# Sentry error monitoring — initialize at module level before any other app code.
+# Sentry error monitoring — initialize at import, before any other app code.
 # SENTRY_DSN must contain the full DSN: https://PUBLIC_KEY@o123456.ingest.sentry.io/PROJECT_ID
-# Empty string (default) = no-op; safe in local dev.
+# Empty DSN (default) or DEBUG=true is a no-op; safe in local dev. serve() logs
+# the resulting status once logging is configured.
 _debug = os.environ.get("DEBUG", "false").lower() == "true"
-_sentry_dsn = os.environ.get("SENTRY_DSN", "")
-if _sentry_dsn and not _debug:
-    sentry_sdk.init(
-        dsn=_sentry_dsn,
-        traces_sample_rate=0.1,
-        send_default_pii=False,
-    )
+_SENTRY_ACTIVE = init_sentry(os.environ.get("SENTRY_DSN", ""), _debug)
 
 _RELOAD_INTERVAL = 2.0  # seconds between plugin directory polls
 
@@ -233,6 +227,7 @@ def serve():
     config = load_config()
     apply_env(config)
     _configure_logging(config)
+    logger.info("Sentry error monitoring: %s", status_message(_SENTRY_ACTIVE))
     config_path = find_config_path()
     printer_name = os.environ.get("SANDY_PRINTER", _DEFAULT_PRINTER)
     if _is_ipp_uri(printer_name):

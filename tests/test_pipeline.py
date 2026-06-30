@@ -94,6 +94,30 @@ def test_run_pipeline_plugin_error():
     assert "kaboom" in error_msg
 
 
+def test_run_pipeline_reports_plugin_error_to_sentry():
+    """A raised plugin error is reported to Sentry, tagged with the plugin name."""
+    import sentry_sdk
+    from sentry_sdk.integrations.logging import LoggingIntegration
+
+    events: list[dict] = []
+    sentry_sdk.init(
+        dsn="https://public@example.com/1",
+        integrations=[LoggingIntegration(event_level=None)],  # mirror production init
+        before_send=lambda event, _hint: events.append(event) or None,
+    )
+    try:
+        plugin = _make_plugin(
+            "boom", ["boom"], "def handle(text, actor): raise RuntimeError('kaboom')"
+        )
+        run_pipeline("boom", "tom", plugins=[plugin])
+        sentry_sdk.flush()
+        assert len(events) == 1
+        assert "exception" in events[0]
+        assert events[0]["tags"]["plugin"] == "boom"
+    finally:
+        sentry_sdk.get_global_scope().set_client(None)
+
+
 def test_run_pipeline_partial_failure():
     good = _make_plugin("good", ["test"], "def handle(text, actor): return 'good'")
     bad = _make_plugin("bad", ["test"], "def handle(text, actor): raise ValueError('oops')")

@@ -22,6 +22,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
+from sandy.observability import capture
+
 name = "sports"
 commands = ["sports", "game today", "next game", "schedule", "games", "scores"]
 
@@ -61,7 +63,8 @@ def _fetch_espn_schedule(sport: str, league: str, team_id: str) -> list[dict]:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         return resp.json().get("events", [])
-    except Exception:
+    except Exception as exc:
+        capture(exc, plugin="sports", source="espn")
         return []
 
 
@@ -178,7 +181,8 @@ def _fetch_football_data_next_game(api_key: str, tz: str | None = None) -> dict 
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         matches = resp.json().get("matches", [])
-    except Exception:
+    except Exception as exc:
+        capture(exc, plugin="sports", source="football-data")
         return None
 
     now = datetime.now(timezone.utc)
@@ -221,7 +225,8 @@ def _fetch_football_data_today_results(api_key: str) -> list[dict]:
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         matches = resp.json().get("matches", [])
-    except Exception:
+    except Exception as exc:
+        capture(exc, plugin="sports", source="football-data")
         return []
 
     results = []
