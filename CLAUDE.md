@@ -86,6 +86,32 @@ Malformed plugins are skipped with a stderr warning, not a crash.
 Partial plugin failure (some succeed, some raise) exits 0.
 All matched plugins fail → exits non-zero.
 
+### Error Reporting (Sentry)
+
+Plugins are defensive — they catch their own failures (API/subprocess/file errors)
+and return a friendly `{"text": ...}` message instead of raising. That means the
+pipeline never sees the exception, so **errors are invisible to Sentry unless the
+plugin reports them explicitly.**
+
+When you catch a *genuine failure* (not control-flow fallback) and turn it into a
+friendly message, also report it:
+
+```python
+from sandy.observability import capture
+
+try:
+    result = some_api_call()
+except Exception as e:
+    capture(e, plugin="myplugin", stage="fetch")  # tags aid filtering in Sentry
+    return {"text": f"Couldn't reach the service: {e}"}
+```
+
+`capture()` is a no-op when Sentry isn't initialized (CLI mode, local dev, DEBUG),
+so it's always safe to call. Do **not** instrument typed control-flow excepts that
+are expected fallbacks (e.g. `ZoneInfoNotFoundError` → default tz, `ValueError`
+while parsing) — those would just create noise. Raised exceptions that propagate to
+the pipeline are captured automatically.
+
 ### CLI Wrapper Pattern
 
 Plugins that wrap sibling CLI tools (estimatedtaxes, itguy) follow a common pattern:
@@ -93,6 +119,8 @@ Plugins that wrap sibling CLI tools (estimatedtaxes, itguy) follow a common patt
 - `subprocess.run()` with `capture_output=True, text=True, timeout=30`
 - Friendly fallback message when the tool isn't on PATH
 - Env vars flow from `sandy.toml` → `os.environ` → inherited by subprocess
+- On unexpected failure (non-zero exit, timeout), `capture()` it before returning
+  the friendly message — see **Error Reporting** above
 
 ## Transport Plugin Contract
 

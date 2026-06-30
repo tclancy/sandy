@@ -181,3 +181,15 @@ def test_handle_fetch_failure():
         result = cryptics.handle("crossword", "tom")
     assert "couldn't fetch" in result["text"].lower()
     assert "Hex" in result["text"]
+
+
+def test_handle_fetch_failure_reports_to_sentry(sentry_events):
+    def boom():
+        raise RuntimeError("network error")
+
+    with patch("sandy.plugins.cryptics.random.choice", return_value=("Hex", boom)):
+        cryptics.handle("crossword", "tom")
+
+    assert len(sentry_events) == 1
+    assert sentry_events[0]["tags"]["plugin"] == "cryptics"
+    assert "exception" in sentry_events[0]

@@ -3,6 +3,8 @@ import re
 
 import requests
 
+from sandy.observability import capture
+
 name = "cryptics"
 commands = ["crossword"]
 
@@ -76,6 +78,7 @@ def handle(text: str, actor: str, caps: frozenset[str] = frozenset()) -> dict:
     try:
         puzzle_page, pdf_url = fetcher()
     except Exception as e:
+        capture(e, plugin="cryptics", source=source_name)
         return {"text": f"Couldn't fetch a crossword from {source_name}: {e}"}
 
     response: dict = {

@@ -2,6 +2,8 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from datetime import datetime, timedelta, timezone
 
+from sandy.observability import capture
+
 name = "spotify"
 commands = ["find me new music", "new music"]
 
@@ -59,6 +61,7 @@ def handle(text: str, actor: str, progress=None, tz: str | None = None) -> dict:
     try:
         sp = _get_spotify_client()
     except Exception as e:
+        capture(e, plugin="spotify")
         return {"text": f"Spotify auth failed: {e}"}
 
     if progress:

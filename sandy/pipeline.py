@@ -9,6 +9,7 @@ from sandy.actors import can_use_plugin, get_owner, resolve_actor, resolve_caps
 from sandy.config import apply_env, get_timezone, load_config
 from sandy.loader import load_plugins
 from sandy.matcher import find_matches
+from sandy.observability import capture
 from sandy.progress import ProgressFn
 
 logger = logging.getLogger(__name__)
@@ -147,6 +148,7 @@ def run_pipeline(
             results.append((match.name, response))
         except Exception as e:
             logger.error("Plugin '%s' failed: %s", match.name, e, exc_info=True)
+            capture(e, plugin=match.name)
             errors.append((match.name, str(e)))
         finally:
             if reporter is not None and hasattr(reporter, "clear"):

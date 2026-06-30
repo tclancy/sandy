@@ -104,6 +104,15 @@ def test_fetch_espn_schedule_returns_empty_on_error():
     assert result == []
 
 
+def test_fetch_espn_schedule_reports_error_to_sentry(sentry_events):
+    with patch("sandy.plugins.sports.requests.get", side_effect=RuntimeError("network down")):
+        result = sports._fetch_espn_schedule("baseball", "mlb", "2")
+    assert result == []  # still degrades gracefully
+    assert len(sentry_events) == 1
+    assert sentry_events[0]["tags"]["plugin"] == "sports"
+    assert sentry_events[0]["tags"]["source"] == "espn"
+
+
 # ---- _parse_espn_next_game ----
 
 

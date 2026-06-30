@@ -1,5 +1,8 @@
 # Sandy Changelog
 
+## 2026-06-30
+- Fix #129: Sentry stayed silent for ~2 months despite visible failures. Root cause: the *only* path that reached Sentry was an unhandled plugin exception (caught by the pipeline) or a hard crash — but Sandy's plugins are defensive and catch their own failures, returning friendly text instead of raising, so nothing was ever reported. New `sandy/observability.py` centralizes init (`init_sentry`) and adds an explicit `capture()` helper (no-op when Sentry is off). The pipeline now explicitly `capture()`s caught plugin errors (tagged with the plugin name), and plugins that swallow failures into friendly messages (cryptics, spotify, sports ESPN/football-data, music_discovery) now report them too. Logging→event auto-capture is disabled (`LoggingIntegration(event_level=None)`) so every Sentry event is explicit and tagged — no duplicates. `sandy serve` logs Sentry status at startup. (462 tests, 86% coverage)
+
 ## 2026-04-16
 - Feat #96: Actor model enforcement — identity resolution (`actors.py`), plugin-level permissions (public/private/allowed_actors), system-level action caps (print, cast). Unknown actors get "I don't know you" message. Cryptics omits print without cap; cast_to_tv rejects without cap. Backward compatible: no config = no enforcement. (411 tests, 86% coverage)
 - Feat #96: Renamed health plugin to help — backward-compat `health` command still works. Help output filtered by actor permissions.
