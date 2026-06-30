@@ -10,7 +10,7 @@ from pathlib import Path
 from sandy.config import apply_env, find_config_path, load_config
 from sandy.loader import load_plugins
 from sandy import oauth_server
-from sandy.observability import init_sentry, status_message
+from sandy.observability import capture, init_sentry, status_message
 from sandy.pipeline import run_pipeline
 from sandy.printer import _DEFAULT_PRINTER, _is_ipp_uri, print_pdf
 from sandy.progress import QueueProgressReporter
@@ -33,6 +33,17 @@ def _plugin_snapshot(plugin_dir: str) -> dict[str, float]:
     return {
         str(p): p.stat().st_mtime for p in Path(plugin_dir).glob("*.py") if p.name != "__init__.py"
     }
+
+
+def _missing_required_plugins(loaded_names: set[str], required_csv: str) -> list[str]:
+    """Return required plugin names (from a comma-separated list) that didn't load.
+
+    ``required_csv`` comes from ``SANDY_REQUIRED_PLUGINS`` — names that *must* be
+    present in a given deployment (e.g. the homelab's entry-point plugins itguy
+    and estimatedtaxes, which a botched ``uv sync --frozen`` can silently prune).
+    """
+    required = [name.strip() for name in required_csv.split(",") if name.strip()]
+    return [name for name in required if name not in loaded_names]
 
 
 class Daemon:
@@ -58,9 +69,29 @@ class Daemon:
         logger.info(
             "Loaded %d content plugin(s): %s", len(self.plugins), [p.name for p in self.plugins]
         )
+        self._alert_on_missing_required_plugins()
         self.transports = load_transports(transport_dir, config)
         logger.info(
             "Loaded %d transport(s): %s", len(self.transports), [t.name for t in self.transports]
+        )
+
+    def _alert_on_missing_required_plugins(self) -> None:
+        """Loudly flag (log + Sentry) any SANDY_REQUIRED_PLUGINS that didn't load.
+
+        A deployment can silently come up missing entry-point plugins (e.g. the
+        homelab siblings itguy/estimatedtaxes pruned by ``uv sync --frozen``).
+        This turns that into a visible startup alert instead of a quiet outage.
+        """
+        loaded = {p.name for p in self.plugins}
+        missing = _missing_required_plugins(loaded, os.environ.get("SANDY_REQUIRED_PLUGINS", ""))
+        if not missing:
+            return
+        joined = ", ".join(missing)
+        logger.error("Required plugin(s) not loaded: %s (loaded: %s)", joined, sorted(loaded))
+        capture(
+            f"Required Sandy plugin(s) not loaded: {joined}",
+            source="startup",
+            missing=joined,
         )
 
     async def handle_message(

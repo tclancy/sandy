@@ -7,7 +7,73 @@ from unittest.mock import patch
 
 import pytest
 
-from sandy.daemon import Daemon, _plugin_snapshot
+from sandy.daemon import Daemon, _missing_required_plugins, _plugin_snapshot
+
+
+# ---------------------------------------------------------------------------
+# _missing_required_plugins
+# ---------------------------------------------------------------------------
+
+
+def test_missing_required_plugins_lists_absent_names():
+    assert _missing_required_plugins({"a", "b"}, "a, c ,d") == ["c", "d"]
+
+
+def test_missing_required_plugins_empty_when_all_present():
+    assert _missing_required_plugins({"a", "b"}, "a,b") == []
+
+
+def test_missing_required_plugins_empty_when_unset():
+    assert _missing_required_plugins({"a"}, "") == []
+
+
+def test_daemon_reports_missing_required_plugin_to_sentry(tmp_path, monkeypatch, sentry_events):
+    """A required plugin that fails to load fires a Sentry alert at startup."""
+    monkeypatch.setenv("SANDY_REQUIRED_PLUGINS", "echo,itguy")
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "echo.py": """
+            name = "echo"
+            commands = ["echo"]
+            def handle(text, actor):
+                return {"text": "ok"}
+        """
+        },
+    )
+
+    Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    import sentry_sdk
+
+    sentry_sdk.flush()
+    assert len(sentry_events) == 1
+    assert "itguy" in sentry_events[0]["message"]
+    assert sentry_events[0]["tags"]["missing"] == "itguy"
+
+
+def test_daemon_silent_when_all_required_plugins_present(tmp_path, monkeypatch, sentry_events):
+    monkeypatch.setenv("SANDY_REQUIRED_PLUGINS", "echo")
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "echo.py": """
+            name = "echo"
+            commands = ["echo"]
+            def handle(text, actor):
+                return {"text": "ok"}
+        """
+        },
+    )
+
+    Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    import sentry_sdk
+
+    sentry_sdk.flush()
+    assert sentry_events == []
 
 
 @pytest.fixture(autouse=True)

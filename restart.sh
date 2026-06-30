@@ -25,8 +25,25 @@ cd "$SCRIPT_DIR"
 # Deploys should run the locked versions; bump deps by re-locking + committing.
 uv sync --frozen --quiet
 
-echo "Installing sibling entry-point packages..."
-uv pip install -e ../itguy -e ../irs --quiet 2>/dev/null || true
+echo "Installing sibling entry-point plugins..."
+# itguy/estimatedtaxes are homelab-only plugins that live outside sandy's
+# lockfile, so `uv sync --frozen` prunes them every run — reinstall explicitly.
+# Fail LOUDLY: a silent skip ships Sandy without the tax/itguy commands (the
+# old `|| true 2>/dev/null` hid exactly that). Siblings are absent in CI / dev
+# checkouts that don't have them — skip those cleanly. `set -e` aborts the
+# deploy before the restart if a present sibling won't install, and the daemon's
+# SANDY_REQUIRED_PLUGINS startup check reports any miss to Sentry on restart.
+sibling_specs=()
+for sib in ../itguy ../irs; do
+    if [ -d "$sib" ]; then
+        sibling_specs+=(-e "$sib")
+    else
+        echo "  (skipping $sib — not present)"
+    fi
+done
+if [ ${#sibling_specs[@]} -gt 0 ]; then
+    uv pip install "${sibling_specs[@]}"
+fi
 
 echo "Restarting sandy service..."
 systemctl --user restart sandy
