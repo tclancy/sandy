@@ -16,6 +16,25 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Non-interactive SSH shells (e.g. `ssh host 'cd ~/sources/sandy && ./restart.sh'`,
+# or itguy's git-pull post-deploy) don't source the login profile, so uv's
+# install dir (~/.local/bin) may be missing from PATH. Prepend the usual
+# locations ourselves so remote/automated runs find uv (used by both
+# `uv sync` and `uv pip install` below). Mirrors itguy's restart.sh (#123).
+for bin_dir in "$HOME/.local/bin" "$HOME/.cargo/bin" /opt/homebrew/bin /usr/local/bin; do
+    case ":$PATH:" in
+        *":$bin_dir:"*) ;;                       # already present — skip
+        *) [ -d "$bin_dir" ] && PATH="$bin_dir:$PATH" ;;
+    esac
+done
+export PATH
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "error: 'uv' not found on PATH (looked in ~/.local/bin, ~/.cargo/bin, /opt/homebrew/bin, /usr/local/bin)." >&2
+    echo "Install it: https://docs.astral.sh/uv/getting-started/installation/" >&2
+    exit 1
+fi
+
 echo "Syncing dependencies..."
 cd "$SCRIPT_DIR"
 # --frozen: install from uv.lock as-is; do NOT re-resolve/rewrite the lock.
