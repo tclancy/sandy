@@ -94,6 +94,66 @@ def test_dispatch_not_shown_when_inactive(tmp_path, monkeypatch):
     assert "dispatch" not in result["text"]
 
 
+def test_handle_renders_command_groups_as_separate_rows(tmp_path, monkeypatch):
+    """A plugin exposing ``command_groups`` should get one help row per group,
+    with the group key hoisted out of the flat commands row. This is the
+    itguy#131 fix (sandy#133 enabler): compound commands like `itguy arr`
+    document their subcommands on their own line instead of appearing as a
+    leaf next to real one-shot commands."""
+    fake_plugin_dir = tmp_path / "plugins"
+    fake_plugin_dir.mkdir()
+    (fake_plugin_dir / "__init__.py").write_text("")
+    (fake_plugin_dir / "itguy_stub.py").write_text(
+        textwrap.dedent("""
+            name = "itguy"
+            commands = ["itguy list", "itguy arr", "itguy scan"]
+            command_groups = {
+                "itguy arr": ["itguy arr list", "itguy arr restart", "itguy arr logs"],
+            }
+            def handle(text, actor):
+                return {"title": "IT Guy", "text": "stub"}
+        """)
+    )
+    cfg_file = tmp_path / "sandy.toml"
+    cfg_file.write_text("")
+    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [cfg_file])
+    monkeypatch.setattr(help_plugin, "_plugin_dir", lambda: fake_plugin_dir)
+
+    result = help_plugin.handle("help", "tom")
+    text = result["text"]
+
+    # Top row: `itguy arr` is de-duped OUT of the flat commands row
+    # (it's rendered as its own group row below).
+    assert "• *itguy*: `itguy list`, `itguy scan`" in text
+    assert "`itguy arr`," not in text  # not in the flat row anymore
+
+    # Group row: `itguy arr` and its subcommands on their own line.
+    assert "• *itguy arr*: `itguy arr list`, `itguy arr restart`, `itguy arr logs`" in text
+
+
+def test_handle_plugin_without_command_groups_unchanged(tmp_path, monkeypatch):
+    """Back-compat: a plugin that doesn't declare command_groups should render
+    exactly like before this change — no missing rows, no de-dup surprises."""
+    fake_plugin_dir = tmp_path / "plugins"
+    fake_plugin_dir.mkdir()
+    (fake_plugin_dir / "__init__.py").write_text("")
+    (fake_plugin_dir / "simple.py").write_text(
+        textwrap.dedent("""
+            name = "simple"
+            commands = ["simple do", "simple undo"]
+            def handle(text, actor):
+                return {"title": "Simple", "text": "stub"}
+        """)
+    )
+    cfg_file = tmp_path / "sandy.toml"
+    cfg_file.write_text("")
+    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [cfg_file])
+    monkeypatch.setattr(help_plugin, "_plugin_dir", lambda: fake_plugin_dir)
+
+    result = help_plugin.handle("help", "tom")
+    assert "• *simple*: `simple do`, `simple undo`" in result["text"]
+
+
 def test_dispatch_shown_when_active(tmp_path, monkeypatch):
     toml_content = textwrap.dedent("""\
         [dispatch]
