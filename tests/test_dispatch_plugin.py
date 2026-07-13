@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import textwrap
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -15,12 +16,28 @@ import sandy.plugins.dispatch as dispatch_plugin
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _clear_dispatchd_http_env(monkeypatch):
+    """Ensure HTTP-backend env vars don't leak into local-file tests."""
+    monkeypatch.delenv("DISPATCHD_BASE_URL", raising=False)
+    monkeypatch.delenv("DISPATCHD_KEY_ID", raising=False)
+    monkeypatch.delenv("DISPATCHD_SECRET", raising=False)
+
+
 @pytest.fixture()
 def dispatch_dir(tmp_path, monkeypatch):
     """Redirect plugin to a temp dispatch dir (simulates local Mac environment)."""
     monkeypatch.setenv("DISPATCH_OBSIDIAN_DIR", str(tmp_path))
     monkeypatch.setenv("DISPATCH_METAFRAMEWORK_DIR", str(tmp_path))
     return tmp_path
+
+
+@pytest.fixture()
+def http_backend(monkeypatch):
+    """Configure the HTTP backend env vars for HMAC-signed dispatchd calls."""
+    monkeypatch.setenv("DISPATCHD_BASE_URL", "http://mac.local:8787")
+    monkeypatch.setenv("DISPATCHD_KEY_ID", "sandy-test")
+    monkeypatch.setenv("DISPATCHD_SECRET", "s" * 64)
 
 
 def _write(path: Path, content: str) -> None:
@@ -258,3 +275,207 @@ def test_handle_case_insensitive(monkeypatch):
     monkeypatch.setattr(dispatch_plugin, "_cmd_status", lambda: {"text": "ok"})
     assert dispatch_plugin.handle("Dispatch Status", "tom") == {"text": "ok"}
     assert dispatch_plugin.handle("DISPATCH STATUS", "tom") == {"text": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# HTTP backend (dispatchd, #136)
+# ---------------------------------------------------------------------------
+
+
+def test_http_config_returns_none_when_partial(monkeypatch):
+    monkeypatch.setenv("DISPATCHD_BASE_URL", "http://mac.local:8787")
+    monkeypatch.setenv("DISPATCHD_KEY_ID", "sandy-test")
+    # DISPATCHD_SECRET intentionally left unset
+    assert dispatch_plugin._http_config() is None
+
+
+def test_http_config_returns_tuple_when_all_set(http_backend):
+    cfg = dispatch_plugin._http_config()
+    assert cfg == ("http://mac.local:8787", "sandy-test", "s" * 64)
+
+
+def test_http_config_strips_trailing_slash(monkeypatch):
+    monkeypatch.setenv("DISPATCHD_BASE_URL", "http://mac.local:8787/")
+    monkeypatch.setenv("DISPATCHD_KEY_ID", "k")
+    monkeypatch.setenv("DISPATCHD_SECRET", "s")
+    cfg = dispatch_plugin._http_config()
+    assert cfg is not None
+    assert cfg[0] == "http://mac.local:8787"
+
+
+def test_remote_context_false_when_http_configured(http_backend, monkeypatch, tmp_path):
+    """HTTP backend overrides remote-context short-circuit."""
+    nonexistent = str(tmp_path / "does_not_exist")
+    monkeypatch.setenv("DISPATCH_OBSIDIAN_DIR", nonexistent)
+    monkeypatch.setenv("DISPATCH_METAFRAMEWORK_DIR", nonexistent)
+    assert dispatch_plugin._remote_context() is False
+
+
+def _stub_call(monkeypatch, envelope: dict) -> list[str]:
+    """Stub _call_dispatchd; return the list that records requested paths."""
+    calls: list[str] = []
+
+    def fake(path: str) -> dict:
+        calls.append(path)
+        return envelope
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    return calls
+
+
+def test_cmd_status_uses_http_when_configured(http_backend, monkeypatch):
+    envelope = {
+        "data": {
+            "text": textwrap.dedent(
+                """\
+                # Memory
+
+                ## Current Status
+
+                - **IN-PROGRESS**: Sandy
+
+                ## Context
+
+                - background
+                """
+            ),
+        },
+        "as_of": "2026-07-13T01:00:00Z",
+    }
+    calls = _stub_call(monkeypatch, envelope)
+    result = dispatch_plugin._cmd_status()
+    assert calls == ["/v1/dispatch/status"]
+    assert result["title"] == "Dispatch Status"
+    assert "IN-PROGRESS" in result["text"]
+    assert "background" not in result["text"]
+
+
+def test_cmd_status_http_empty_memory(http_backend, monkeypatch):
+    _stub_call(monkeypatch, {"data": {"text": ""}})
+    result = dispatch_plugin._cmd_status()
+    assert result["title"] == "Dispatch Status"
+    assert "empty" in result["text"].lower()
+
+
+def test_cmd_status_http_error(http_backend, monkeypatch):
+    def raise_urlerror(_path):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", raise_urlerror)
+    result = dispatch_plugin._cmd_status()
+    assert "unreachable" in result["text"]
+
+
+def test_cmd_pm_uses_http_when_configured(http_backend, monkeypatch):
+    envelope = {
+        "data": {
+            "text": textwrap.dedent(
+                """\
+                ---
+                title: PM Inbox
+                ---
+                # PM Inbox
+
+                - [skill-request 2026-03-20]: something
+                """
+            ),
+        }
+    }
+    _stub_call(monkeypatch, envelope)
+    result = dispatch_plugin._cmd_pm()
+    assert result["title"] == "PM Inbox"
+    assert "skill-request" in result["text"]
+    assert "title: PM Inbox" not in result["text"]  # frontmatter stripped
+
+
+def test_cmd_pm_http_empty(http_backend, monkeypatch):
+    _stub_call(monkeypatch, {"data": {"text": "   \n"}})
+    result = dispatch_plugin._cmd_pm()
+    assert "empty" in result["text"].lower()
+
+
+def test_cmd_check_uses_http_when_configured(http_backend, monkeypatch):
+    envelope = {
+        "data": {
+            "status": "ok",
+            "in_flight": {
+                "session_type": "dayshift",
+                "pid": 12345,
+                "started_at": "2026-07-13T01:00:00Z",
+            },
+        },
+        "as_of": "2026-07-13T01:05:00Z",
+    }
+    calls = _stub_call(monkeypatch, envelope)
+    result = dispatch_plugin._cmd_check()
+    assert calls == ["/v1/health"]
+    assert result["title"] == "Dispatch Activity"
+    assert "Health: ok" in result["text"]
+    assert "dayshift" in result["text"]
+    assert "12345" in result["text"]
+    assert "As of: 2026-07-13T01:05:00Z" in result["text"]
+
+
+def test_cmd_check_http_no_in_flight(http_backend, monkeypatch):
+    _stub_call(monkeypatch, {"data": {"status": "ok", "in_flight": None}})
+    result = dispatch_plugin._cmd_check()
+    assert "In-flight: none" in result["text"]
+
+
+def test_cmd_check_http_error(http_backend, monkeypatch):
+    class FakeHTTPError(urllib.error.HTTPError):
+        def __init__(self):
+            super().__init__(url="", code=401, msg="unauthorized", hdrs=None, fp=None)
+
+    def raise_http(_path):
+        raise FakeHTTPError()
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", raise_http)
+    result = dispatch_plugin._cmd_check()
+    assert "401" in result["text"]
+
+
+def test_call_dispatchd_signs_request(http_backend, monkeypatch):
+    """_call_dispatchd sends Authorization + X-Nonce + X-Timestamp with the
+    HMAC-SHA256 signature computed over method / path / body-sha / nonce / ts.
+    """
+    import hashlib
+    import hmac as hmac_mod
+    import json
+
+    captured: dict[str, dispatch_plugin.urllib.request.Request] = {}
+
+    class FakeResp:
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self) -> bytes:
+            return self._payload
+
+    def fake_urlopen(req, timeout):  # noqa: ARG001
+        captured["req"] = req
+        return FakeResp(json.dumps({"data": {"text": "hi"}}).encode("utf-8"))
+
+    monkeypatch.setattr(dispatch_plugin.urllib.request, "urlopen", fake_urlopen)
+
+    envelope = dispatch_plugin._call_dispatchd("/v1/dispatch/status")
+    assert envelope == {"data": {"text": "hi"}}
+
+    req = captured["req"]
+    assert req.full_url == "http://mac.local:8787/v1/dispatch/status"
+    assert req.headers["X-nonce"]  # header case-normalized by urllib
+    ts = req.headers["X-timestamp"]
+    auth = req.headers["Authorization"]
+    key_id, sig = auth[len("HMAC ") :].split(":", 1)
+    assert key_id == "sandy-test"
+
+    body_sha = hashlib.sha256(b"").hexdigest()
+    canonical = f"GET\n/v1/dispatch/status\n{body_sha}\n{req.headers['X-nonce']}\n{ts}"
+    expected = hmac_mod.new(("s" * 64).encode(), canonical.encode(), hashlib.sha256).hexdigest()
+    assert sig == expected
