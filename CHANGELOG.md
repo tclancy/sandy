@@ -1,5 +1,8 @@
 # Sandy Changelog
 
+## 2026-07-13
+- Fix #139: `help` plugin is context-aware — no longer fires when help is a subcommand flag (e.g. `itguy logs --help`). New `match_mode = "prefix"` in `sandy/matcher.py` restricts a plugin's substring match to the leading intent; only `help` opts in. Retired the `health` alias (pre-#96 shim, no callers left).
+
 ## 2026-06-30
 - Fix #129: Sentry stayed silent for ~2 months despite visible failures. Root cause: the *only* path that reached Sentry was an unhandled plugin exception (caught by the pipeline) or a hard crash — but Sandy's plugins are defensive and catch their own failures, returning friendly text instead of raising, so nothing was ever reported. New `sandy/observability.py` centralizes init (`init_sentry`) and adds an explicit `capture()` helper (no-op when Sentry is off). The pipeline now explicitly `capture()`s caught plugin errors (tagged with the plugin name), and plugins that swallow failures into friendly messages (cryptics, spotify, sports ESPN/football-data, music_discovery) now report them too. Logging→event auto-capture is disabled (`LoggingIntegration(event_level=None)`) so every Sentry event is explicit and tagged — no duplicates. `sandy serve` logs Sentry status at startup. (462 tests, 86% coverage)
 

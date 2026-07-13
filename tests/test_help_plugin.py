@@ -6,6 +6,7 @@ import textwrap
 
 import sandy.config as config_module
 import sandy.plugins.help as help_plugin
+from sandy.matcher import find_matches
 
 
 def test_name():
@@ -16,8 +17,30 @@ def test_commands_include_help():
     assert "help" in help_plugin.commands
 
 
-def test_commands_include_health_backward_compat():
-    assert "health" in help_plugin.commands
+def test_health_alias_removed():
+    """`health` was a backward-compat shim for the pre-#96 name. Retired
+    in #139 alongside the context-aware match — no callers remain."""
+    assert "health" not in help_plugin.commands
+
+
+def test_match_mode_is_prefix():
+    """The whole point of #139: prefix mode is what makes `itguy logs --help`
+    stop dragging the help plugin along."""
+    assert getattr(help_plugin, "match_mode", None) == "prefix"
+
+
+def test_help_does_not_match_when_help_is_a_subcommand_flag():
+    """Regression for #139: `itguy logs --help` normalizes to
+    `itguy logs help` and must NOT route to the help plugin."""
+    assert find_matches("itguy logs --help", [help_plugin]) == []
+
+
+def test_help_matches_when_it_is_the_primary_intent():
+    """Sanity: `help` on its own (with or without polite framing) still
+    routes to the help plugin — prefix mode isn't a lockout."""
+    assert find_matches("help", [help_plugin]) == [help_plugin]
+    assert find_matches("please help", [help_plugin]) == [help_plugin]
+    assert find_matches("help me", [help_plugin]) == [help_plugin]
 
 
 def test_handle_returns_title_and_text():

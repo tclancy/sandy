@@ -4,7 +4,10 @@ Shows available commands filtered by the requesting actor's permissions.
 
 Commands:
   "help"     — list commands you have access to
-  "health"   — same (backward compat)
+
+Uses ``match_mode = "prefix"`` so ``help`` only fires when it's the leading
+intent, not when it appears mid-sentence like ``itguy logs --help`` (#139).
+The ``health`` alias was retired in the same change.
 """
 
 from __future__ import annotations
@@ -16,7 +19,8 @@ from sandy.config import load_config
 from sandy.loader import load_plugins
 
 name = "help"
-commands = ["help", "health"]
+commands = ["help"]
+match_mode = "prefix"
 
 
 def _plugin_dir() -> Path:
