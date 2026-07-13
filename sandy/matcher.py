@@ -28,19 +28,41 @@ def normalize(text: str) -> str:
     return " ".join(text.split())
 
 
+def _matches(normalized: str, command: str, mode: str) -> bool:
+    """Return True if the plugin's command matches the normalized text.
+
+    ``mode`` is the plugin's ``match_mode`` attribute (default ``"substring"``):
+
+    - ``"substring"`` — case-insensitive substring match; the historical default
+      that lets polite framing like "please find me new music today" still
+      route to the ``new music`` command.
+    - ``"prefix"`` — the command must equal the whole text or appear as the
+      first whitespace-delimited phrase. Opt-in for generic leaf words like
+      ``help`` where a substring match drags the plugin into unrelated
+      commands (e.g. ``itguy logs --help`` normalizes to ``itguy logs help``
+      and would otherwise fire the help plugin alongside itguy — #139).
+    """
+    cmd_lower = command.lower()
+    if mode == "prefix":
+        return normalized == cmd_lower or normalized.startswith(cmd_lower + " ")
+    return cmd_lower in normalized
+
+
 def find_matches(text: str, plugins: list) -> list:
     """Find all plugins with a command phrase matching the input text.
 
     Normalizes input before matching (strips punctuation and polite words).
-    Iterates plugins in order, checks each command phrase as a
-    case-insensitive substring match. All matching plugins are returned.
-    A plugin appears at most once even if multiple commands match.
+    Iterates plugins in order and asks each command phrase. Substring is the
+    default; a plugin can opt into a stricter matcher with ``match_mode``
+    (see ``_matches``). All matching plugins are returned; a plugin appears
+    at most once even if multiple commands match.
     """
     normalized = normalize(text)
     matches = []
     for plugin in plugins:
+        mode = getattr(plugin, "match_mode", "substring")
         for command in plugin.commands:
-            if command.lower() in normalized:
+            if _matches(normalized, command, mode):
                 matches.append(plugin)
                 break  # move to next plugin, don't duplicate
     return matches

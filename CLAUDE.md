@@ -182,7 +182,7 @@ post-pull hook for `itguy deploy sandy`.
 - **dispatch** — Dispatch automation status from Obsidian files (`"dispatch status"`, `"status"`)
 - **estimatedtaxes** — tax queries via `estimatedtaxes` CLI (`"tax summary"`, `"tax list"`, `"tax sync"`)
 - **itguy** — homelab deployment via `itguy` CLI (`"itguy list"`, `"itguy deploy"`, `"itguy force"`)
-- **health** — list active plugins and commands (`"health"`)
+- **help** — list active plugins and commands (`"help"`); prefix-matched so it only fires when help is the primary intent
 
 ### Transports
 

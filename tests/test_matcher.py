@@ -2,9 +2,11 @@ from sandy.matcher import find_matches, normalize
 
 
 class FakePlugin:
-    def __init__(self, name, commands):
+    def __init__(self, name, commands, match_mode=None):
         self.name = name
         self.commands = commands
+        if match_mode is not None:
+            self.match_mode = match_mode
 
     def handle(self, text, actor):
         return f"{self.name} handled it"
@@ -100,3 +102,48 @@ def test_find_matches_preserves_alphabetical_order():
     charlie = FakePlugin("charlie", ["nope"])
     result = find_matches("summarize my day", [alpha, beta, charlie])
     assert result == [alpha, beta]
+
+
+# `match_mode = "prefix"` — an opt-in stricter matcher for generic leaf-word
+# commands (namely `help`), so that "itguy logs --help" doesn't drag the help
+# plugin in alongside the itguy plugin (#139).
+
+
+def test_prefix_mode_matches_exact_text():
+    plugin = FakePlugin("help", ["help"], match_mode="prefix")
+    assert find_matches("help", [plugin]) == [plugin]
+
+
+def test_prefix_mode_matches_when_command_is_first_word():
+    plugin = FakePlugin("help", ["help"], match_mode="prefix")
+    assert find_matches("help me please", [plugin]) == [plugin]
+
+
+def test_prefix_mode_does_not_match_when_command_appears_mid_sentence():
+    """The key #139 case: `itguy logs --help` normalizes to `itguy logs help`
+    and the help plugin must NOT match — otherwise Sandy dumps the default
+    help alongside itguy's own logs output."""
+    plugin = FakePlugin("help", ["help"], match_mode="prefix")
+    assert find_matches("itguy logs help", [plugin]) == []
+
+
+def test_prefix_mode_does_not_match_partial_word():
+    """`help` at prefix must be a whole word, not a stem — `helpful` should
+    not match."""
+    plugin = FakePlugin("help", ["help"], match_mode="prefix")
+    assert find_matches("helpful", [plugin]) == []
+
+
+def test_prefix_mode_survives_polite_wrapping():
+    """`normalize` strips leading `please` before matching, so `please help`
+    still matches prefix."""
+    plugin = FakePlugin("help", ["help"], match_mode="prefix")
+    assert find_matches("please help", [plugin]) == [plugin]
+
+
+def test_substring_mode_still_default_for_untagged_plugins():
+    """Sanity: adding match_mode support must not change matching for the
+    plugins that don't declare it — most Sandy plugins depend on substring
+    matching to catch commands embedded in polite framing."""
+    plugin = FakePlugin("music", ["new music"])
+    assert find_matches("please play me some new music today", [plugin]) == [plugin]
