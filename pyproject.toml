@@ -10,7 +10,7 @@ dependencies = [
     "spotipy>=2.26.0",
     "pylast>=7.1.0",
     "pychromecast>=14.0.10",
-    "sentry-sdk>=2.64.0",
+    "sentry-sdk>=2.65.0",
 ]
 
 [tool.pytest.ini_options]
@@ -42,7 +42,7 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.20",
+    "ruff>=0.15.21",
     "pre-commit>=4.6.0",
     "pytest-asyncio>=1.4.0",
 ]
