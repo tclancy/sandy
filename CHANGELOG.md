@@ -1,6 +1,7 @@
 # Sandy Changelog
 
 ## 2026-07-14
+- Fix: dispatch plugin sends `User-Agent: sandy-dispatchd-client/1.0` — Cloudflare's Browser Integrity Check (error 1010) blocked the default `Python-urllib` UA at the tunnel before requests reached dispatchd, surfacing as a mystery 403 on every signed call. Found during the first homelab→Mac end-to-end deploy of #136.
 - Feat #136: dispatch plugin talks to dispatchd over HTTP with HMAC-SHA256 request signing — `dispatch status` / `check` / `pm` hit the `/v1/*` read surface so homelab Sandy no longer needs Mac filesystem access. Per review, the local-file fallback was removed entirely: dispatchd is the single backend, and an unconfigured plugin (missing any of `DISPATCHD_BASE_URL` / `DISPATCHD_KEY_ID` / `DISPATCHD_SECRET`) returns a friendly setup message. The three per-command HTTP functions collapsed into one registry-driven dispatcher; wire shapes are typed (`Envelope` / `InFlightRow` TypedDicts); HTTP failures are reported to Sentry via `observability.capture()` (tagged `plugin=dispatch`, `stage=<endpoint>`). Multi-angle pre-push review then caught: in-flight run kind read from the wrong key (`session_type`/`mode` → dispatchd actually sends `shift`), HMAC headers forwarded on cross-host redirects (redirects now refused), malformed 200 responses escaping the friendly-error path, post-connect timeouts misclassified, and a silent first-20-lines truncation.
 
 ## 2026-07-13

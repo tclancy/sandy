@@ -146,6 +146,9 @@ def _call_dispatchd(path: str) -> Envelope:
             "Authorization": f"HMAC {key_id}:{sig}",
             "X-Nonce": nonce,
             "X-Timestamp": ts,
+            # Cloudflare's Browser Integrity Check (error 1010) bans the
+            # default Python-urllib UA before the request reaches dispatchd.
+            "User-Agent": "sandy-dispatchd-client/1.0",
         },
     )
     with _OPENER.open(req, timeout=_HTTP_TIMEOUT_SECONDS) as resp:
