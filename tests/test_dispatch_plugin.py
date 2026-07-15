@@ -392,7 +392,7 @@ def test_call_dispatchd_signs_request(http_backend, monkeypatch):
     assert req.full_url == "http://mac.local:8787/v1/dispatch/status"
     assert req.headers["X-nonce"]  # header case-normalized by urllib
     # Cloudflare BIC bans the default Python-urllib UA (error 1010)
-    assert req.headers["User-agent"] == "sandy-dispatchd-client/1.0"
+    assert req.headers["User-agent"] == "dispatch-sandy/1.0"
     ts = req.headers["X-timestamp"]
     auth = req.headers["Authorization"]
     key_id, sig = auth[len("HMAC ") :].split(":", 1)
