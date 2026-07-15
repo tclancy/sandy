@@ -53,13 +53,17 @@ _NOT_CONFIGURED_TEXT = (
 
 
 class InFlightRow(TypedDict, total=False):
-    """One in-flight run from /v1/health. dispatchd's registry has used both
-    ``session_type`` and ``mode`` for the run kind across versions."""
+    """One in-flight run from /v1/health — dispatchd's ``Run.as_dict()``
+    (metaframework ``dispatchd/registry.py``). The run kind lives under
+    ``shift``."""
 
-    session_type: str
-    mode: str
+    run_id: str
+    shift: str
+    status: str
     pid: int
     started_at: str
+    ended_at: str | None
+    exit_code: int | None
 
 
 class EnvelopeData(TypedDict, total=False):
@@ -103,6 +107,19 @@ def _http_config() -> tuple[str, str, str] | None:
     return base_url, key_id, secret
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse to follow redirects: urllib forwards the Authorization, X-Nonce,
+    and X-Timestamp headers to the redirect target — even cross-host — which
+    would hand a replayable signature to whatever the server 302s to. A 3xx
+    from dispatchd is an error, not a hop."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _call_dispatchd(path: str) -> Envelope:
     """GET a dispatchd endpoint with HMAC-SHA256, return the parsed envelope.
 
@@ -131,7 +148,7 @@ def _call_dispatchd(path: str) -> Envelope:
             "X-Timestamp": ts,
         },
     )
-    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_SECONDS) as resp:
+    with _OPENER.open(req, timeout=_HTTP_TIMEOUT_SECONDS) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -146,6 +163,9 @@ def _http_error_message(exc: Exception, kind: str) -> str:
         return f"dispatchd returned {exc.code} for {kind}."
     if isinstance(exc, urllib.error.URLError):
         return f"dispatchd unreachable ({exc.reason}) for {kind}."
+    # A timeout after connect raises bare TimeoutError, not URLError.
+    if isinstance(exc, TimeoutError):
+        return f"dispatchd unreachable (timed out) for {kind}."
     return f"dispatchd {kind} failed: {exc}"
 
 
@@ -162,16 +182,19 @@ def _extract_current_status(raw: str) -> str:
     match = re.search(r"## Current Status\n(.*?)(?=\n## |\Z)", raw, re.DOTALL)
     if match:
         return match.group(1).strip()
-    return "\n".join(raw.splitlines()[:20])
+    lines = raw.splitlines()
+    if len(lines) <= 20:
+        return "\n".join(lines)
+    return "\n".join(lines[:20]) + "\n… (first 20 lines of memory.md)"
 
 
 def _format_in_flight(row: InFlightRow | None) -> str:
     if not row:
         return "In-flight: none."
-    session = row.get("session_type") or row.get("mode") or "?"
+    kind = row.get("shift", "?")
     pid = row.get("pid", "?")
     started = row.get("started_at", "?")
-    return f"In-flight: {session} (pid {pid}, started {started})."
+    return f"In-flight: {kind} (pid {pid}, started {started})."
 
 
 def _format_status(envelope: Envelope) -> str:
@@ -224,11 +247,14 @@ def _run_command(command: _Command) -> PluginResponse:
         # Expected on a fresh install — control flow, not a Sentry event.
         return {"title": command.title, "text": _NOT_CONFIGURED_TEXT}
     try:
+        # format stays inside the try: a 200 whose JSON isn't the expected
+        # envelope shape (null, list, string) must get the same friendly
+        # message + tagged capture as a transport failure.
         envelope = _call_dispatchd(command.path)
+        return {"title": command.title, "text": command.format(envelope)}
     except Exception as exc:
         capture(exc, plugin="dispatch", stage=command.kind)
         return {"title": command.title, "text": _http_error_message(exc, command.kind)}
-    return {"title": command.title, "text": command.format(envelope)}
 
 
 def handle(text: str, actor: str) -> PluginResponse:

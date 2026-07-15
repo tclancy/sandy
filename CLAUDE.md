@@ -179,7 +179,7 @@ post-pull hook for `itguy deploy sandy`.
 - **real_men** — Bud Light Real Men of Genius audio clips (`"real man"`, `"real men"`)
 - **cast_to_tv** — Chromecast/Google TV control (`"cast to tv"`, `"stop casting"`)
 - **youtube_tv** — YouTube TV channel tuning via ADB (`"watch "`, `"tune to "`, `"put on "`)
-- **dispatch** — Dispatch automation status from Obsidian files (`"dispatch status"`, `"status"`)
+- **dispatch** — Dispatch automation status via dispatchd's HMAC-signed HTTP API (`"dispatch status"`, `"dispatch check"`, `"dispatch pm"`)
 - **estimatedtaxes** — tax queries via `estimatedtaxes` CLI (`"tax summary"`, `"tax list"`, `"tax sync"`)
 - **itguy** — homelab deployment via `itguy` CLI (`"itguy list"`, `"itguy deploy"`, `"itguy force"`)
 - **help** — list active plugins and commands (`"help"`); prefix-matched so it only fires when help is the primary intent

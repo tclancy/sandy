@@ -159,6 +159,16 @@ def test_status_falls_back_to_first_lines_when_no_section(http_backend, monkeypa
     _stub_call(monkeypatch, {"data": {"text": "Line one\nLine two\nLine three\n"}})
     result = dispatch_plugin.handle("dispatch status", "tom")
     assert "Line one" in result["text"]
+    assert "first 20 lines" not in result["text"]  # short doc: no truncation marker
+
+
+def test_status_fallback_marks_truncation(http_backend, monkeypatch):
+    text = "\n".join(f"line {i}" for i in range(30))
+    _stub_call(monkeypatch, {"data": {"text": text}})
+    result = dispatch_plugin.handle("dispatch status", "tom")
+    assert "line 19" in result["text"]
+    assert "line 20" not in result["text"]
+    assert "first 20 lines" in result["text"]  # truncation is visible, not silent
 
 
 def test_status_empty_memory(http_backend, monkeypatch):
@@ -174,13 +184,18 @@ def test_status_empty_memory(http_backend, monkeypatch):
 
 
 def test_check_reports_health_and_in_flight(http_backend, monkeypatch):
+    # in_flight mirrors dispatchd's Run.as_dict() (metaframework registry.py)
     envelope = {
         "data": {
             "status": "ok",
             "in_flight": {
-                "session_type": "dayshift",
+                "run_id": "r1",
+                "shift": "dayshift",
+                "status": "running",
                 "pid": 12345,
                 "started_at": "2026-07-13T01:00:00Z",
+                "ended_at": None,
+                "exit_code": None,
             },
         },
         "as_of": "2026-07-13T01:05:00Z",
@@ -261,6 +276,24 @@ def test_http_error_reports_status_code(http_backend, monkeypatch):
     _stub_call_raises(monkeypatch, _make_http_error(401))
     result = dispatch_plugin.handle("dispatch check", "tom")
     assert "401" in result["text"]
+
+
+def test_timeout_becomes_unreachable_message(http_backend, monkeypatch):
+    """Post-connect timeouts raise bare TimeoutError, not URLError."""
+    _stub_call_raises(monkeypatch, TimeoutError("timed out"))
+    result = dispatch_plugin.handle("dispatch status", "tom")
+    assert "unreachable" in result["text"]
+
+
+def test_malformed_envelope_gets_friendly_message(http_backend, monkeypatch):
+    """A 200 whose JSON isn't the envelope shape must not escape handle()."""
+    captured: list = []
+    monkeypatch.setattr(dispatch_plugin, "capture", lambda e, **c: captured.append(e))
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", lambda _path: None)
+    result = dispatch_plugin.handle("dispatch check", "tom")
+    assert result["title"] == "Dispatch Activity"
+    assert "failed" in result["text"]
+    assert len(captured) == 1
 
 
 def test_http_error_is_captured_to_sentry(http_backend, monkeypatch):
@@ -346,11 +379,11 @@ def test_call_dispatchd_signs_request(http_backend, monkeypatch):
         def read(self) -> bytes:
             return self._payload
 
-    def fake_urlopen(req, timeout):  # noqa: ARG001
+    def fake_open(req, timeout):  # noqa: ARG001
         captured["req"] = req
         return FakeResp(json.dumps({"data": {"text": "hi"}}).encode("utf-8"))
 
-    monkeypatch.setattr(dispatch_plugin.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(dispatch_plugin._OPENER, "open", fake_open)
 
     envelope = dispatch_plugin._call_dispatchd("/v1/dispatch/status")
     assert envelope == {"data": {"text": "hi"}}
@@ -367,3 +400,13 @@ def test_call_dispatchd_signs_request(http_backend, monkeypatch):
     canonical = f"GET\n/v1/dispatch/status\n{body_sha}\n{req.headers['X-nonce']}\n{ts}"
     expected = hmac_mod.new(("s" * 64).encode(), canonical.encode(), hashlib.sha256).hexdigest()
     assert sig == expected
+
+
+def test_opener_refuses_redirects():
+    """Redirects must not be followed: urllib would forward the Authorization,
+    X-Nonce, and X-Timestamp headers to the redirect target, even cross-host.
+    """
+    handler = next(
+        h for h in dispatch_plugin._OPENER.handlers if isinstance(h, dispatch_plugin._NoRedirect)
+    )
+    assert handler.redirect_request(None, None, 302, "Found", {}, "http://evil.example/") is None
