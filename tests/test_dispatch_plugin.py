@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac as hmac_mod
+import io
+import json
 import textwrap
 import urllib.error
 
 import pytest
 
 import sandy.plugins.dispatch as dispatch_plugin
+from sandy import matcher, pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -412,3 +417,355 @@ def test_opener_refuses_redirects():
         h for h in dispatch_plugin._OPENER.handlers if isinstance(h, dispatch_plugin._NoRedirect)
     )
     assert handler.redirect_request(None, None, 302, "Found", {}, "http://evil.example/") is None
+
+
+# ---------------------------------------------------------------------------
+# Part C: `dispatch work <URL>` — POST /v1/dispatch/work (sandy #137)
+# ---------------------------------------------------------------------------
+
+
+def test_commands_include_work():
+    assert "dispatch work" in dispatch_plugin.commands
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (
+            "dispatch work https://github.com/tclancy/sandy/issues/137",
+            "https://github.com/tclancy/sandy/issues/137",
+        ),
+        (
+            "dispatch work https://github.com/tclancy/sandy/pull/138",
+            "https://github.com/tclancy/sandy/pull/138",
+        ),
+        # Slack wraps bare URLs in angle brackets, and uses <url|label> when a
+        # display text is attached. Both must survive.
+        (
+            "dispatch work <https://github.com/tclancy/sandy/issues/137>",
+            "https://github.com/tclancy/sandy/issues/137",
+        ),
+        (
+            "dispatch work <https://github.com/tclancy/sandy/issues/137|sandy#137>",
+            "https://github.com/tclancy/sandy/issues/137",
+        ),
+        # Slack's display text routinely contains spaces — it is whatever the
+        # linking user typed, and GitHub's own unfurl uses the issue title. The
+        # URL must be lifted out of the brackets *before* any whitespace split,
+        # or the label's first space truncates the link mid-parse.
+        (
+            "dispatch work <https://github.com/tclancy/sandy/issues/137|sandy issue 137>",
+            "https://github.com/tclancy/sandy/issues/137",
+        ),
+        (
+            "dispatch work <https://github.com/tclancy/sandy/pull/138|Add the work client>",
+            "https://github.com/tclancy/sandy/pull/138",
+        ),
+        # A comment permalink is the most natural thing to paste from a thread.
+        (
+            "dispatch work https://github.com/tclancy/sandy/issues/137#issuecomment-5041346895",
+            "https://github.com/tclancy/sandy/issues/137",
+        ),
+        # Mixed case owner/repo, trailing slash, http, www, extra whitespace.
+        (
+            "  Dispatch Work   http://www.github.com/TClancy/Sandy/Issues/137/  ",
+            "https://github.com/tclancy/sandy/issues/137",
+        ),
+    ],
+)
+def test_parse_work_command_accepts(raw, expected):
+    assert dispatch_plugin._parse_work_command(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "dispatch work",  # no URL at all
+        "dispatch work    ",
+        "dispatch work https://github.com/tclancy/sandy",  # repo root, no target
+        "dispatch work https://github.com/tclancy",  # org/user only
+        "dispatch work https://github.com/tclancy/sandy/discussions/12",
+        "dispatch work https://github.com/tclancy/sandy/blob/main/README.md",
+        "dispatch work https://github.com/tclancy/sandy/tree/main",
+        "dispatch work https://github.com/tclancy/sandy/wiki/Home",
+        "dispatch work https://gitlab.com/tclancy/sandy/issues/137",
+        "dispatch work https://github.com/tclancy/sandy/issues/notanumber",
+        "dispatch work not-a-url-at-all",
+    ],
+)
+def test_parse_work_command_rejects(raw):
+    assert dispatch_plugin._parse_work_command(raw) is None
+
+
+def test_parse_work_command_trusts_the_link_target_not_the_display_text():
+    """Slack's display text is attacker-controlled and can claim to be one
+    URL while pointing at another. Only the half before the ``|`` is the real
+    destination, so a link that *reads* like a valid issue but resolves
+    elsewhere must be rejected rather than parsed out of the label."""
+    spoofed = (
+        "dispatch work <https://evil.example.com/pwn|https://github.com/tclancy/sandy/issues/137>"
+    )
+    assert dispatch_plugin._parse_work_command(spoofed) is None
+
+
+def test_parse_work_command_returns_none_for_other_commands():
+    """The work matcher must not swallow the read commands."""
+    assert dispatch_plugin._parse_work_command("dispatch status") is None
+    assert dispatch_plugin._parse_work_command("dispatch check") is None
+
+
+def test_work_unconfigured_returns_friendly_message():
+    resp = dispatch_plugin.handle("dispatch work https://github.com/tclancy/sandy/issues/1", "tom")
+    assert resp["text"] == dispatch_plugin._NOT_CONFIGURED_TEXT
+
+
+def test_work_rejects_bad_url_without_calling_dispatchd(http_backend, monkeypatch):
+    """Client-side shape check is belt-and-suspenders: the endpoint refuses
+    these too, but a local reject is instant and does not burn a round trip."""
+
+    def boom(*args, **kwargs):
+        raise AssertionError("should not have called dispatchd")
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", boom)
+    resp = dispatch_plugin.handle("dispatch work https://github.com/tclancy/sandy", "tom")
+    assert "issues" in resp["text"] and "pull" in resp["text"]
+
+
+def test_work_happy_path_posts_url_and_reports_target(http_backend, monkeypatch):
+    captured = {}
+
+    def fake(path, *, method="GET", payload=None):
+        captured["path"] = path
+        captured["method"] = method
+        captured["payload"] = payload
+        return {
+            "data": {
+                "run_id": "9f1c2b7e-0000-4000-8000-000000000001",
+                "url": "https://github.com/tclancy/sandy/issues/137",
+                "target": {"owner": "tclancy", "repo": "sandy", "kind": "issue", "number": 137},
+                "started_at": "2026-07-27T17:42:00Z",
+            }
+        }
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    resp = dispatch_plugin.handle(
+        "dispatch work https://github.com/tclancy/sandy/issues/137#issuecomment-1", "tom"
+    )
+
+    assert captured["path"] == "/v1/dispatch/work"
+    assert captured["method"] == "POST"
+    # The canonicalized URL goes on the wire; the server re-derives the target
+    # from it, so the checks run against exactly what we echoed.
+    assert captured["payload"] == {"url": "https://github.com/tclancy/sandy/issues/137"}
+    assert "tclancy/sandy" in resp["text"]
+    assert "137" in resp["text"]
+    assert "9f1c2b7e-0000-4000-8000-000000000001" in resp["text"]
+
+
+def test_work_202_does_not_claim_the_run_is_running(http_backend, monkeypatch):
+    """202 means *spawned*, not *running* (meta#438).
+
+    The in-flight registry is written only by dispatchd's own endpoints, so a
+    POST during a launchd-started shift passes the 409 check and then loses the
+    LockManager race. Telling Tom "started" would be a lie he acts on.
+    """
+    monkeypatch.setattr(
+        dispatch_plugin,
+        "_call_dispatchd",
+        lambda path, *, method="GET", payload=None: {
+            "data": {
+                "run_id": "r1",
+                "target": {"owner": "tclancy", "repo": "sandy", "kind": "issue", "number": 137},
+            }
+        },
+    )
+    text = dispatch_plugin.handle(
+        "dispatch work https://github.com/tclancy/sandy/issues/137", "tom"
+    )["text"].lower()
+    assert "spawned" in text
+    assert "dispatch check" in text
+
+
+@pytest.mark.parametrize(
+    "code,error,must_mention",
+    [
+        (400, "bad_request", "issues"),
+        (403, "forbidden", "work"),
+        (403, "forbidden_owner", "owner"),
+        (403, "forbidden_path", "checkout"),
+        (404, "repo_not_found", "clone"),
+        (409, "conflict", "in flight"),
+    ],
+)
+def test_work_error_codes_get_actionable_messages(
+    http_backend, monkeypatch, code, error, must_mention
+):
+    body = json.dumps({"error": error, "message": "server-side detail"}).encode()
+    exc = urllib.error.HTTPError(
+        "http://mac.local:8787/v1/dispatch/work", code, "err", {}, io.BytesIO(body)
+    )
+
+    def fake(path, *, method="GET", payload=None):
+        raise exc
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    resp = dispatch_plugin.handle(
+        "dispatch work https://github.com/tclancy/sandy/issues/137", "tom"
+    )
+    assert must_mention.lower() in resp["text"].lower()
+
+
+def test_work_conflict_does_not_call_itself_a_global_lock(http_backend, monkeypatch):
+    """The 409 only knows about runs dispatchd itself started (meta#438).
+
+    A scheduled shift writes no registry row, so 'nothing is in flight' is not
+    the same as 'the machine is free'. The Slack copy must not overclaim.
+    """
+    body = json.dumps({"error": "conflict", "message": "another run is in flight"}).encode()
+
+    def fake(path, *, method="GET", payload=None):
+        raise urllib.error.HTTPError("u", 409, "conflict", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    text = dispatch_plugin.handle(
+        "dispatch work https://github.com/tclancy/sandy/issues/137", "tom"
+    )["text"].lower()
+    for overclaim in ("global", "mutex", "nothing else can run", "only one run"):
+        assert overclaim not in text
+
+
+def test_work_unknown_error_code_still_surfaces_the_server_message(http_backend, monkeypatch):
+    body = json.dumps({"error": "teapot", "message": "I am a teapot"}).encode()
+
+    def fake(path, *, method="GET", payload=None):
+        raise urllib.error.HTTPError("u", 418, "teapot", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    resp = dispatch_plugin.handle(
+        "dispatch work https://github.com/tclancy/sandy/issues/137", "tom"
+    )
+    assert "I am a teapot" in resp["text"]
+
+
+def test_work_non_json_error_body_does_not_crash(http_backend, monkeypatch):
+    """A proxy or Cloudflare page in front of dispatchd returns HTML, not JSON."""
+
+    def fake(path, *, method="GET", payload=None):
+        raise urllib.error.HTTPError("u", 502, "bad gateway", {}, io.BytesIO(b"<html>nope</html>"))
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    resp = dispatch_plugin.handle(
+        "dispatch work https://github.com/tclancy/sandy/issues/137", "tom"
+    )
+    assert "502" in resp["text"]
+
+
+def test_call_dispatchd_post_signs_the_body(http_backend, monkeypatch):
+    """The HMAC canonical string hashes the request body, so a POST must sign
+    the JSON payload — a GET-shaped signature over b'' would 401."""
+    captured = {}
+
+    class FakeResp:
+        def __init__(self, payload: bytes):
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self) -> bytes:
+            return self._payload
+
+    def fake_open(req, timeout):  # noqa: ARG001
+        captured["req"] = req
+        return FakeResp(json.dumps({"data": {"run_id": "r1"}}).encode("utf-8"))
+
+    monkeypatch.setattr(dispatch_plugin._OPENER, "open", fake_open)
+
+    payload = {"url": "https://github.com/tclancy/sandy/issues/137"}
+    dispatch_plugin._call_dispatchd("/v1/dispatch/work", method="POST", payload=payload)
+
+    req = captured["req"]
+    assert req.get_method() == "POST"
+    assert req.headers["Content-type"] == "application/json"
+    body = req.data
+    assert json.loads(body.decode()) == payload
+
+    ts = req.headers["X-timestamp"]
+    nonce = req.headers["X-nonce"]
+    sig = req.headers["Authorization"][len("HMAC ") :].split(":", 1)[1]
+    body_sha = hashlib.sha256(body).hexdigest()
+    canonical = f"POST\n/v1/dispatch/work\n{body_sha}\n{nonce}\n{ts}"
+    expected = hmac_mod.new(("s" * 64).encode(), canonical.encode(), hashlib.sha256).hexdigest()
+    assert sig == expected
+
+
+# ---------------------------------------------------------------------------
+# Routing guard: the URL has to survive the trip from Slack to the parser
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "dispatch work https://github.com/tclancy/sandy/issues/137",
+        "dispatch work <https://github.com/tclancy/sandy/issues/137>",
+        "dispatch work <https://github.com/tclancy/sandy/issues/137|sandy#137>",
+    ],
+)
+def test_matcher_routes_work_messages_to_this_plugin(message):
+    """``matcher.normalize`` strips punctuation before matching, which turns a
+    URL into an unrecognisable run of letters. That is fine — "dispatch work"
+    still survives as a substring — but only as long as the *raw* text is what
+    reaches handle(). This guards the routing half of that."""
+    assert dispatch_plugin in matcher.find_matches(message, [dispatch_plugin])
+
+
+def test_pipeline_hands_the_plugin_the_raw_url_not_the_normalized_text(http_backend, monkeypatch):
+    """End-to-end through the real pipeline, because every unit test above
+    calls ``handle`` directly and so cannot see this failure mode.
+
+    ``matcher.normalize`` strips ``:`` and ``/``, which would reduce the URL to
+    an unparseable run of letters. Matching uses the normalized text (fine —
+    "dispatch work" survives as a substring) but ``handle`` must receive the
+    raw message. If that ever flips, `dispatch work` breaks silently in Slack
+    while the unit tests stay green.
+    """
+    captured = {}
+
+    def fake(path, *, method="GET", payload=None):
+        captured["payload"] = payload
+        return {
+            "data": {
+                "run_id": "r1",
+                "target": {"owner": "tclancy", "repo": "sandy", "kind": "issue", "number": 137},
+            }
+        }
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    results, errors = pipeline.run_pipeline(
+        "dispatch work <https://github.com/tclancy/sandy/issues/137|sandy#137>",
+        actor="tom",
+        config={},
+        plugins=[dispatch_plugin],
+    )
+
+    assert errors == []
+    assert [name for name, _ in results] == ["dispatch"]
+    assert captured["payload"] == {"url": "https://github.com/tclancy/sandy/issues/137"}
+    # The premise: normalization really would have destroyed the URL.
+    assert matcher.normalize("dispatch work https://github.com/tclancy/sandy/issues/137") == (
+        "dispatch work httpsgithubcomtclancysandyissues137"
+    )
+
+
+def test_help_documents_the_work_argument():
+    """`dispatch work` alone is unusable, so help must name the argument. The
+    `command_groups` hoist (itguy#131) is what keeps it off the leaf row."""
+    group = dispatch_plugin.command_groups["dispatch work"]
+    assert group == ["dispatch work <github issue or PR URL>"]
+    # The group key is de-duped out of the flat row by help.py, so the bare
+    # "dispatch work" must stay in `commands` for the matcher to route on it.
+    assert "dispatch work" in dispatch_plugin.commands

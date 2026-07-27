@@ -183,11 +183,24 @@ active = "yes"
 
 
 # ---- Dispatch Plugin ----
-# Read-only window into the Dispatch automation system, served by dispatchd
+# A window into the Dispatch automation system, served by dispatchd
 # (metaframework docs/dispatchd.md) over HMAC-signed HTTP. All three vars are
 # required — with any missing, dispatch commands reply "not configured".
 # The key id + secret come from ~/.config/dispatchd/keys.toml on the Mac
 # running dispatchd. Set active = "yes" to enable.
+#
+# Capabilities are granted per key in that same keys.toml, and the plugin only
+# gets what the key carries:
+#   read  — "dispatch status" / "check" / "pm"   (the three read commands)
+#   work  — "dispatch work <github issue or PR URL>", which spawns an agent run
+# `work` is deliberately NOT implied by `read`: handing an agent an arbitrary
+# repo is a different privilege from reading a status file, so a key that only
+# needs the dashboard should not be able to start work. Without it, the work
+# command replies that the key lacks the capability and nothing is spawned.
+#
+# The dispatch plugin stays at the `default_access = "private"` set under
+# [permissions] above — "dispatch work" starts real work on Tom's Mac and is
+# not something a public channel should reach.
 [dispatch]
 active = "no"
 
