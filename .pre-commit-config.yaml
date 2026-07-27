@@ -19,7 +19,13 @@ repos:
     hooks:
       - id: pytest-cov
         name: pytest (with coverage)
-        entry: uv run pytest
+        # --frozen: a bare `uv run` re-resolves against PyPI and rewrites the
+        # tracked uv.lock as a side effect. pre-commit fails any hook that
+        # modifies a file, so every commit died on "files were modified by
+        # this hook" with all tests green. Honouring the committed lock is
+        # also what we want on principle — the hook should test the pinned
+        # dependency set, not whatever resolved fresh this minute.
+        entry: uv run --frozen pytest
         language: system
         pass_filenames: false
         always_run: true
