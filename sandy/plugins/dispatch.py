@@ -1,28 +1,31 @@
 """Sandy plugin: Dispatch commands.
 
-A window into the Dispatch automation system, plus one write command that
-hands an agent a piece of work.
+A window into the Dispatch automation system, plus two write commands — one
+that hands an agent a piece of work, one that re-fires a scheduled shift.
 
 Commands:
-  "dispatch status"     — current state from memory.md
-  "dispatch check"      — dispatchd health and in-flight run status
-  "dispatch pm"         — contents of PM Inbox.md
-  "dispatch work <URL>" — hand a GitHub issue/PR URL to an ad-hoc agent run
+  "dispatch status"      — current state from memory.md
+  "dispatch check"       — dispatchd health and in-flight run status
+  "dispatch pm"          — contents of PM Inbox.md
+  "dispatch work <URL>"  — hand a GitHub issue/PR URL to an ad-hoc agent run
+  "dispatch shift <kind>" — trigger a Mac-side ``dispatch <kind>`` run
 
 There is one backend: dispatchd's ``/v1/*`` surface (metaframework #326 for
-the reads, #435 for ``POST /v1/dispatch/work``), reached over HTTP with
-HMAC-SHA256 request signing. The plugin is configured by three env vars —
+the reads, #382 for ``POST /v1/dispatch/shift``, #435 for
+``POST /v1/dispatch/work``), reached over HTTP with HMAC-SHA256 request
+signing. The plugin is configured by three env vars —
 ``DISPATCHD_BASE_URL``, ``DISPATCHD_KEY_ID``, and ``DISPATCHD_SECRET``. When
 any of them is unset, every command returns a friendly "not configured"
 message; there is no local-file fallback (Mac dev runs dispatchd from the
 metaframework repo, same as production).
 
-``dispatch work`` is the only command here that changes anything. It is
-gated the same way the read commands are — ``[permissions]`` in
-``sandy.toml`` leaves the ``dispatch`` plugin at ``default_access =
-"private"``, so only the owner reaches it — and again server-side by the
-``work`` capability on the dispatchd key, which is deliberately *not*
-implied by ``shift``.
+``dispatch work`` and ``dispatch shift`` are the commands here that change
+anything. They are gated the same way the read commands are —
+``[permissions]`` in ``sandy.toml`` leaves the ``dispatch`` plugin at
+``default_access = "private"``, so only the owner reaches them — and again
+server-side by a capability on the dispatchd key. The two caps are
+deliberately separate: ``work`` points an agent at an arbitrary repo,
+``shift`` only re-fires a preset, and neither implies the other.
 """
 
 from __future__ import annotations
@@ -46,13 +49,31 @@ commands = [
     "dispatch check",
     "dispatch pm",
     "dispatch work",
+    "dispatch shift",
 ]
 
-# `dispatch work` is useless without an argument, so hoist it onto its own help
-# row that names the argument instead of listing it as a bare leaf next to the
-# three read commands (the `command_groups` convention from itguy#131).
+# Listed for humans only — dispatchd owns the authoritative vocabulary
+# (`SHIFT_KINDS` in metaframework `dispatchd/actions.py`). Deliberately NOT
+# used to validate: a client-side allowlist drifts into refusing a kind the
+# server has since added, and a false refusal is a worse failure than one
+# wasted round trip. dispatchd's 400 already names the valid set, so an unknown
+# kind is answered by `_write_http_error_message` echoing it. That makes this
+# tuple purely documentation — if it goes stale the help text is mildly wrong
+# and nothing breaks.
+#
+# This is deliberately unlike `dispatch work`, which *does* check its argument
+# client-side (`_GITHUB_TARGET_RE`). The two are different categories: a GitHub
+# URL is a *shape*, and shapes don't drift; a shift kind is membership in a
+# server-owned enum, which does. Please don't "fix" the inconsistency.
+_SHIFT_KINDS = ("night", "day", "wrapup", "pmreview", "sanity", "selffix")
+
+# `dispatch work` and `dispatch shift` are useless without an argument, so each
+# gets its own help row naming the argument instead of sitting as a bare leaf
+# next to the three read commands (the `command_groups` convention from
+# itguy#131).
 command_groups = {
     "dispatch work": ["dispatch work <github issue or PR URL>"],
+    "dispatch shift": [f"dispatch shift <{'|'.join(_SHIFT_KINDS)}>"],
 }
 
 _HTTP_TIMEOUT_SECONDS = 5
@@ -61,6 +82,34 @@ _NOT_CONFIGURED_TEXT = (
     "Sandy is not configured to reach dispatchd.\n"
     "Set DISPATCHD_BASE_URL, DISPATCHD_KEY_ID, and DISPATCHD_SECRET "
     "(see metaframework docs/dispatchd.md)."
+)
+
+# Shared by both spawn commands. dispatchd's in-flight registry only records
+# runs its *own* endpoints started, so a launchd-started shift leaves no row and
+# a 202 during one is genuine — the child then loses the `LockManager` race and
+# exits (meta#438). Saying "spawned" and pointing at `dispatch check` is the
+# honest reading of a 202; saying "running" is not.
+_SPAWN_CAVEAT = (
+    "Heads up: 202 means it was spawned, not that it's running — a "
+    "scheduled shift can still be holding the lock. Run `dispatch check` "
+    "in a minute to confirm it took."
+)
+
+# A 409 reads the same whichever endpoint refused, so both write commands share
+# the copy rather than drifting apart.
+_BUSY_TEXT = (
+    "dispatchd already has a run in flight, so it didn't start another one. "
+    "Try `dispatch check` to see what it's busy with, then re-send once "
+    "that clears."
+)
+
+# Polite framing and sentence punctuation, stripped from an argument-bearing
+# command without touching the argument itself. `sandy.matcher.normalize` does
+# more than this (it deletes ALL punctuation) and is used for routing; see
+# `_tidy` for why an argument needs the gentler treatment.
+_LEADING_POLITE_RE = re.compile(r"^(?:(?:please|thanks|thank\s+you)[\s,]+)+", re.IGNORECASE)
+_TRAILING_NOISE_RE = re.compile(
+    r"(?:[\s,]+(?:please|thanks|thank\s+you)|[.!?,;:]+)+$", re.IGNORECASE
 )
 
 
@@ -95,8 +144,9 @@ class WorkTarget(TypedDict, total=False):
 class EnvelopeData(TypedDict, total=False):
     """Union of the ``data`` payloads across the endpoints we call:
     ``text`` for /v1/dispatch/status and /v1/dispatch/pm-inbox,
-    ``status`` + ``in_flight`` for /v1/health, and the run handshake
-    (``run_id`` + ``target``) for /v1/dispatch/work."""
+    ``status`` + ``in_flight`` for /v1/health, the run handshake
+    (``run_id`` + ``target``) for /v1/dispatch/work, and the shift
+    handshake (``run_id`` + ``kind`` + ``slot``) for /v1/dispatch/shift."""
 
     text: str
     status: str
@@ -105,6 +155,8 @@ class EnvelopeData(TypedDict, total=False):
     url: str
     target: WorkTarget
     started_at: str
+    kind: str
+    slot: str | None
 
 
 class Envelope(TypedDict, total=False):
@@ -327,11 +379,7 @@ _WORK_ERROR_TEXT: dict[str, str] = {
         "won't clone one for you. Clone it under the work directory, then "
         "re-send."
     ),
-    "conflict": (
-        "dispatchd already has a run in flight, so it didn't start another one. "
-        "Try `dispatch check` to see what it's busy with, then re-send once "
-        "that clears."
-    ),
+    "conflict": _BUSY_TEXT,
 }
 
 
@@ -396,11 +444,7 @@ def _format_work(envelope: Envelope) -> str:
     run_id = data.get("run_id")
     if run_id:
         lines.append(f"Run: {run_id}")
-    lines.append(
-        "Heads up: 202 means it was spawned, not that it's running — a "
-        "scheduled shift can still be holding the lock. Run `dispatch check` "
-        "in a minute to confirm it took."
-    )
+    lines.append(_SPAWN_CAVEAT)
     return "\n".join(lines)
 
 
@@ -420,17 +464,70 @@ def _read_error_payload(exc: urllib.error.HTTPError) -> tuple[str, str] | None:
     return str(payload.get("error", "")), str(payload.get("message", ""))
 
 
-def _work_http_error_message(exc: urllib.error.HTTPError) -> str:
+def _write_http_error_message(
+    exc: urllib.error.HTTPError, kind: str, error_text: dict[str, str]
+) -> str:
+    """Translate a dispatchd error body into Slack copy for a write command.
+
+    Keyed on the machine ``error`` code rather than the HTTP status because one
+    status can cover several genuinely different fixes. A code with no entry in
+    ``error_text`` falls through to dispatchd's own ``message``, which is the
+    right default when the server's phrasing is more current than anything the
+    client could hardcode (see ``_SHIFT_ERROR_TEXT``).
+    """
     parsed = _read_error_payload(exc)
     if parsed is None:
-        return _http_error_message(exc, "work")
+        return _http_error_message(exc, kind)
     code, message = parsed
-    known = _WORK_ERROR_TEXT.get(code)
+    known = error_text.get(code)
     if known:
         return known
     if message:
-        return f"dispatchd returned {exc.code} for work: {message}"
-    return _http_error_message(exc, "work")
+        return f"dispatchd returned {exc.code} for {kind}: {message}"
+    return _http_error_message(exc, kind)
+
+
+class _WriteCommand(NamedTuple):
+    """A POST endpoint plus the copy used to render its outcomes."""
+
+    path: str
+    title: str
+    kind: str  # short label for error messages and Sentry's `stage` tag
+    error_text: dict[str, str]
+    format: Callable[[Envelope], str]
+
+
+def _post_command(command: _WriteCommand, payload: dict) -> PluginResponse:
+    """POST to a write endpoint and render the result.
+
+    Shared by ``dispatch work`` and ``dispatch shift`` so the capture policy
+    below is decided once. Both commands reach dispatchd the same way and
+    differ only in payload, copy, and the error codes they can provoke.
+    """
+    try:
+        envelope = _call_dispatchd(command.path, method="POST", payload=payload)
+        return {"title": command.title, "text": command.format(envelope)}
+    except urllib.error.HTTPError as exc:
+        # 4xx here is the endpoint working as designed (bad input, missing cap,
+        # busy) — user-facing control flow, not an incident. Only 5xx is.
+        if exc.code >= 500:
+            capture(exc, plugin="dispatch", stage=command.kind)
+        return {
+            "title": command.title,
+            "text": _write_http_error_message(exc, command.kind, command.error_text),
+        }
+    except Exception as exc:
+        capture(exc, plugin="dispatch", stage=command.kind)
+        return {"title": command.title, "text": _http_error_message(exc, command.kind)}
+
+
+_WORK_COMMAND = _WriteCommand(
+    path="/v1/dispatch/work",
+    title=_WORK_TITLE,
+    kind="work",
+    error_text=_WORK_ERROR_TEXT,
+    format=_format_work,
+)
 
 
 def _run_work(raw: str) -> PluginResponse:
@@ -442,18 +539,144 @@ def _run_work(raw: str) -> PluginResponse:
     if url is None:
         return {"title": _WORK_TITLE, "text": _WORK_ERROR_TEXT["bad_request"]}
 
-    try:
-        envelope = _call_dispatchd("/v1/dispatch/work", method="POST", payload={"url": url})
-        return {"title": _WORK_TITLE, "text": _format_work(envelope)}
-    except urllib.error.HTTPError as exc:
-        # 4xx here is the endpoint working as designed (bad paste, missing cap,
-        # busy) — user-facing control flow, not an incident. Only 5xx is.
-        if exc.code >= 500:
-            capture(exc, plugin="dispatch", stage="work")
-        return {"title": _WORK_TITLE, "text": _work_http_error_message(exc)}
-    except Exception as exc:
-        capture(exc, plugin="dispatch", stage="work")
-        return {"title": _WORK_TITLE, "text": _http_error_message(exc, "work")}
+    return _post_command(_WORK_COMMAND, {"url": url})
+
+
+# ---------------------------------------------------------------------------
+# "dispatch shift <kind>" — POST /v1/dispatch/shift (sandy #137 Part A)
+# ---------------------------------------------------------------------------
+
+_SHIFT_TITLE = "Dispatch Shift"
+
+# Anchored so this matcher can never swallow "dispatch status"/"check"/"pm".
+_SHIFT_COMMAND_RE = re.compile(r"^dispatch\s+shift\b\s*(?P<rest>.*)$", re.IGNORECASE | re.DOTALL)
+
+_SHIFT_HELP = (
+    "`dispatch shift <kind>` runs a Dispatch shift on the Mac.\n"
+    f"Kinds: {', '.join(_SHIFT_KINDS)}.\n"
+    "Fire-and-forget — I'll reply with a run id; use `dispatch check` for status."
+)
+
+_SHIFT_ERROR_TEXT: dict[str, str] = {
+    "forbidden": (
+        "This Sandy key doesn't carry the `shift` capability, so it can't start "
+        'a shift. Add "shift" to its caps in dispatchd\'s config and reload the '
+        "launchd unit."
+    ),
+    "conflict": _BUSY_TEXT,
+    # `bad_request` is intentionally absent — see _SHIFT_KINDS.
+}
+
+
+class _ShiftParse(NamedTuple):
+    """Outcome of reading a ``dispatch shift`` message.
+
+    Exactly one field is set: ``kind`` when there is something to POST,
+    ``error`` when the message can't be acted on and the user needs telling.
+    """
+
+    kind: str | None = None
+    error: str | None = None
+
+
+def _tidy(text: str) -> str:
+    """Strip the polite framing and sentence punctuation Slack messages carry.
+
+    Deliberately *not* :func:`~sandy.matcher.normalize`. Normalize is right for
+    routing but wrong for reading an argument: it deletes every character in
+    ``string.punctuation``, so a hyphenated shift kind silently loses its
+    hyphen — ``pm-review`` arrives at dispatchd as ``pmreview`` and comes back
+    as a 400 quoting a string the user never typed. Since the whole point of
+    letting the server own the vocabulary (see ``_SHIFT_KINDS``) is that a kind
+    added server-side just works, corrupting the kind on the way out would
+    defeat it. This strips only the framing and leaves the words intact.
+    """
+    cleaned = _LEADING_POLITE_RE.sub("", text.strip())
+    return _TRAILING_NOISE_RE.sub("", cleaned).strip()
+
+
+def _is_shift_command(text: str) -> bool:
+    """True when this message is addressed to ``dispatch shift``."""
+    return _SHIFT_COMMAND_RE.match(_tidy(text)) is not None
+
+
+def _parse_shift_command(text: str) -> _ShiftParse:
+    """Read the shift kind out of a ``dispatch shift <kind>`` message.
+
+    The message is tidied (not normalized — see :func:`_tidy`) before matching,
+    because ``handle`` receives the *raw* Slack text while routing happened on
+    the normalized form. Without that the plugin could be handed a message the
+    framework matched and then fail to recognise it. Tidying is what lets
+    "Dispatch Shift Night", "dispatch shift day." and "please dispatch shift
+    night" all resolve, while leaving the kind itself byte-accurate.
+
+    A second word is refused rather than dropped. It would be read as a
+    ``slot``, and no slot value is safe to send today (see ``_run_shift``);
+    silently ignoring an argument the user typed is the bug the `dispatch`
+    wrapper itself had to fix in metaframework #284.
+    """
+    match = _SHIFT_COMMAND_RE.match(_tidy(text))
+    if match is None:
+        return _ShiftParse(error=_SHIFT_HELP)
+
+    words = match.group("rest").split()
+    if not words:
+        return _ShiftParse(error=_SHIFT_HELP)
+    if len(words) > 1:
+        extra = " ".join(words[1:])
+        return _ShiftParse(
+            error=(
+                f"I can only take a shift kind, but got {extra!r} after "
+                f"{words[0]!r}. Slots aren't wired up yet — send just "
+                f"`dispatch shift {words[0]}`."
+            )
+        )
+    # Case is the one thing safe to fold: dispatchd's kinds are all lowercase,
+    # and Slack capitalizes the first word of a sentence for you.
+    return _ShiftParse(kind=words[0].lower())
+
+
+def _format_shift(envelope: Envelope) -> str:
+    """Render the 202 handshake. Says *spawned*, never *running* (meta#438)."""
+    data = envelope.get("data") or {}
+    kind = data.get("kind")
+    lines = [f"Spawned the {kind} shift." if kind else "Spawned the shift."]
+    run_id = data.get("run_id")
+    if run_id:
+        lines.append(f"Run: {run_id}")
+    lines.append(_SPAWN_CAVEAT)
+    return "\n".join(lines)
+
+
+_SHIFT_COMMAND = _WriteCommand(
+    path="/v1/dispatch/shift",
+    title=_SHIFT_TITLE,
+    kind="shift",
+    error_text=_SHIFT_ERROR_TEXT,
+    format=_format_shift,
+)
+
+
+def _run_shift(raw: str) -> PluginResponse:
+    """Trigger a shift.
+
+    ``slot`` is always ``None``, and that is load-bearing rather than a
+    simplification. dispatchd appends a non-null slot to the child argv
+    (``spawn_shift``), but `dispatch`'s top-level parser accepts exactly one
+    positional — so ``dispatch dayshift 9am`` exits 2 immediately. By then the
+    endpoint has returned 202 with a run_id and written a "running" registry
+    row, so the shift looks spawned and never ran. Until meta#450 is fixed
+    there is no slot value this client can safely send.
+    """
+    if _http_config() is None:
+        # Expected on a fresh install — control flow, not a Sentry event.
+        return {"title": _SHIFT_TITLE, "text": _NOT_CONFIGURED_TEXT}
+
+    parsed = _parse_shift_command(raw)
+    if parsed.kind is None:
+        return {"title": _SHIFT_TITLE, "text": parsed.error or _SHIFT_HELP}
+
+    return _post_command(_SHIFT_COMMAND, {"kind": parsed.kind, "slot": None})
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +720,11 @@ def handle(text: str, actor: str) -> PluginResponse:
     # generic unknown-command reply.
     if _WORK_COMMAND_RE.match(raw):
         return _run_work(raw)
+    # Same reasoning as work: matched on the command shape, not on a successful
+    # parse, so a missing or malformed kind gets the help text rather than the
+    # generic unknown-command reply.
+    if _is_shift_command(raw):
+        return _run_shift(raw)
     command = _COMMANDS.get(raw.lower())
     if command is None:
         return {"text": f"Unknown dispatch command: {text!r}"}
