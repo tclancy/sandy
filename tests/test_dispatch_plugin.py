@@ -769,3 +769,229 @@ def test_help_documents_the_work_argument():
     # The group key is de-duped out of the flat row by help.py, so the bare
     # "dispatch work" must stay in `commands` for the matcher to route on it.
     assert "dispatch work" in dispatch_plugin.commands
+
+
+# ---------------------------------------------------------------------------
+# Part A: `dispatch shift <kind>` — POST /v1/dispatch/shift (sandy #137)
+# ---------------------------------------------------------------------------
+
+
+def _stub_post(monkeypatch, envelope: dict) -> list[dict]:
+    """Stub _call_dispatchd for a POST; return the list recording each call."""
+    calls: list[dict] = []
+
+    def fake(path, *, method="GET", payload=None):
+        calls.append({"path": path, "method": method, "payload": payload})
+        return envelope
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    return calls
+
+
+def _shift_envelope(kind: str = "night") -> dict:
+    return {
+        "data": {
+            "run_id": "3f2b1c00-0000-4000-8000-000000000001",
+            "kind": kind,
+            "slot": None,
+            "started_at": "2026-07-28T07:12:00Z",
+        }
+    }
+
+
+def test_commands_include_shift():
+    assert "dispatch shift" in dispatch_plugin.commands
+
+
+def test_command_groups_document_shift():
+    group = dispatch_plugin.command_groups["dispatch shift"]
+    assert len(group) == 1
+    # Every kind dispatchd accepts should be discoverable from the help row.
+    for kind in ("night", "day", "wrapup", "pmreview", "sanity", "selffix"):
+        assert kind in group[0]
+    # The bare phrase must stay in `commands` or the matcher never routes to us.
+    assert "dispatch shift" in dispatch_plugin.commands
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("dispatch shift night", "night"),
+        ("dispatch shift day", "day"),
+        ("dispatch shift wrapup", "wrapup"),
+        ("dispatch shift pmreview", "pmreview"),
+        ("dispatch shift sanity", "sanity"),
+        ("dispatch shift selffix", "selffix"),
+        # Slack is a chat box: case, padding, trailing punctuation and polite
+        # framing all arrive verbatim because `handle` gets the raw text.
+        ("Dispatch Shift Night", "night"),
+        ("  dispatch   shift   day  ", "day"),
+        ("dispatch shift day.", "day"),
+        ("dispatch shift day please", "day"),
+        ("please dispatch shift night", "night"),
+    ],
+)
+def test_parse_shift_command_reads_the_kind(raw, expected):
+    assert dispatch_plugin._parse_shift_command(raw).kind == expected
+
+
+def test_parse_shift_command_without_a_kind_offers_help():
+    parsed = dispatch_plugin._parse_shift_command("dispatch shift")
+    assert parsed.kind is None
+    # The help must name the kinds — it is the only place they are listed.
+    for kind in ("night", "day", "wrapup", "pmreview", "sanity", "selffix"):
+        assert kind in parsed.error
+
+
+def test_parse_shift_command_refuses_a_second_word():
+    """A slot is not silently dropped — see test_shift_never_sends_a_slot for why
+    sending one would be actively harmful."""
+    parsed = dispatch_plugin._parse_shift_command("dispatch shift day 9am")
+    assert parsed.kind is None
+    assert "9am" in parsed.error
+
+
+def test_shift_unconfigured_returns_friendly_message():
+    resp = dispatch_plugin.handle("dispatch shift night", "tom")
+    assert resp["title"] == "Dispatch Shift"
+    assert "not configured" in resp["text"].lower()
+
+
+def test_shift_posts_the_kind_to_the_shift_endpoint(http_backend, monkeypatch):
+    calls = _stub_post(monkeypatch, _shift_envelope("night"))
+    resp = dispatch_plugin.handle("dispatch shift night", "tom")
+
+    assert calls[0]["path"] == "/v1/dispatch/shift"
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["payload"]["kind"] == "night"
+    assert resp["title"] == "Dispatch Shift"
+    assert "3f2b1c00-0000-4000-8000-000000000001" in resp["text"]
+
+
+def test_shift_never_sends_a_slot(http_backend, monkeypatch):
+    """`slot` must always be null.
+
+    dispatchd appends a non-null slot to the child argv (`spawn_shift` in
+    metaframework `dispatchd/actions.py`), but `dispatch`'s top-level parser
+    takes exactly one positional — so `dispatch dayshift 9am` exits 2 before
+    doing any work. The endpoint has already returned 202 with a run_id and
+    written a "running" registry row by then, so the failure is invisible:
+    Slack says spawned, and nothing ran. Until that is fixed server-side,
+    the only safe slot this client can send is none at all.
+    """
+    calls = _stub_post(monkeypatch, _shift_envelope("day"))
+    dispatch_plugin.handle("dispatch shift day", "tom")
+    assert calls[0]["payload"] == {"kind": "day", "slot": None}
+
+
+def test_shift_reply_says_spawned_not_running(http_backend, monkeypatch):
+    """meta#438: the in-flight registry only knows runs dispatchd itself
+    started, so a 202 during a launchd shift is real and the child then loses
+    the LockManager race. The copy must not promise it is running."""
+    _stub_post(monkeypatch, _shift_envelope("night"))
+    text = dispatch_plugin.handle("dispatch shift night", "tom")["text"]
+
+    assert "spawned" in text.lower()
+    assert "dispatch check" in text
+    lowered = text.lower()
+    for overclaim in ("is running", "now running", "started running"):
+        assert overclaim not in lowered
+
+
+def test_shift_forbidden_names_the_shift_capability(http_backend, monkeypatch):
+    """403 on this endpoint means the key lacks `shift` — not `work`. Getting
+    this wrong sends Tom to edit the wrong line of keys.toml."""
+    body = json.dumps({"error": "forbidden", "message": "key missing capability: shift"}).encode()
+
+    def fake(path, *, method="GET", payload=None):
+        raise urllib.error.HTTPError("u", 403, "forbidden", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    text = dispatch_plugin.handle("dispatch shift night", "tom")["text"]
+    assert "shift" in text
+    assert "work" not in text.lower()
+
+
+def test_shift_conflict_does_not_claim_a_global_mutex(http_backend, monkeypatch):
+    body = json.dumps({"error": "conflict", "message": "another shift is already running"}).encode()
+
+    def fake(path, *, method="GET", payload=None):
+        raise urllib.error.HTTPError("u", 409, "conflict", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    text = dispatch_plugin.handle("dispatch shift night", "tom")["text"].lower()
+    assert "dispatch check" in text
+    for overclaim in ("global", "mutex", "nothing else can run", "only one run"):
+        assert overclaim not in text
+
+
+def test_shift_bad_request_echoes_the_servers_valid_kinds(http_backend, monkeypatch):
+    """The client deliberately does not keep its own copy of the kind
+    vocabulary. dispatchd's 400 already lists the valid set, and echoing it
+    means a kind added server-side is never refused by a stale client list."""
+    body = json.dumps(
+        {
+            "error": "bad_request",
+            "message": (
+                "unknown shift kind: 'nite'. valid: day, night, pmreview, sanity, selffix, wrapup"
+            ),
+        }
+    ).encode()
+
+    def fake(path, *, method="GET", payload=None):
+        raise urllib.error.HTTPError("u", 400, "bad request", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    text = dispatch_plugin.handle("dispatch shift nite", "tom")["text"]
+    assert "nite" in text
+    assert "pmreview" in text
+
+
+def test_shift_4xx_is_not_captured_but_5xx_is(http_backend, monkeypatch):
+    """A busy daemon or a missing cap is control flow, not an incident."""
+    captured: list[Exception] = []
+    monkeypatch.setattr(dispatch_plugin, "capture", lambda e, **k: captured.append(e))
+
+    def raise_code(code):
+        body = json.dumps({"error": "conflict", "message": "busy"}).encode()
+
+        def fake(path, *, method="GET", payload=None):
+            raise urllib.error.HTTPError("u", code, "x", {}, io.BytesIO(body))
+
+        return fake
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", raise_code(409))
+    dispatch_plugin.handle("dispatch shift night", "tom")
+    assert captured == []
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", raise_code(503))
+    dispatch_plugin.handle("dispatch shift night", "tom")
+    assert len(captured) == 1
+
+
+def test_shift_non_json_error_body_does_not_crash(http_backend, monkeypatch):
+    def fake(path, *, method="GET", payload=None):
+        raise urllib.error.HTTPError("u", 502, "bad gateway", {}, io.BytesIO(b"<html>nope</html>"))
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    assert "502" in dispatch_plugin.handle("dispatch shift night", "tom")["text"]
+
+
+def test_shift_unreachable_daemon_is_friendly(http_backend, monkeypatch):
+    def fake(path, *, method="GET", payload=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    assert "unreachable" in dispatch_plugin.handle("dispatch shift night", "tom")["text"]
+
+
+def test_shift_does_not_swallow_the_read_commands(http_backend, monkeypatch):
+    """The shift matcher is anchored, so `dispatch status` must still read."""
+    _stub_call(monkeypatch, {"data": {"text": "## Current Status\nall good"}})
+    assert "all good" in dispatch_plugin.handle("dispatch status", "tom")["text"]
+
+
+def test_matcher_routes_a_shift_message_to_this_plugin():
+    """End-to-end through sandy's own matcher: `commands` must carry the phrase
+    or the plugin is never consulted, however good the internal parser is."""
+    assert dispatch_plugin in matcher.find_matches("dispatch shift night", [dispatch_plugin])
