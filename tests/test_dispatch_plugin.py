@@ -876,8 +876,8 @@ def test_shift_never_sends_a_slot(http_backend, monkeypatch):
     takes exactly one positional — so `dispatch dayshift 9am` exits 2 before
     doing any work. The endpoint has already returned 202 with a run_id and
     written a "running" registry row by then, so the failure is invisible:
-    Slack says spawned, and nothing ran. Until that is fixed server-side,
-    the only safe slot this client can send is none at all.
+    Slack says spawned, and nothing ran. Until meta#450 is fixed, the only
+    safe slot this client can send is none at all.
     """
     calls = _stub_post(monkeypatch, _shift_envelope("day"))
     dispatch_plugin.handle("dispatch shift day", "tom")

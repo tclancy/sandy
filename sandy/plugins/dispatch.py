@@ -635,8 +635,8 @@ def _run_shift(raw: str) -> PluginResponse:
     (``spawn_shift``), but `dispatch`'s top-level parser accepts exactly one
     positional — so ``dispatch dayshift 9am`` exits 2 immediately. By then the
     endpoint has returned 202 with a run_id and written a "running" registry
-    row, so the shift looks spawned and never ran. Until that is fixed
-    server-side there is no slot value this client can safely send.
+    row, so the shift looks spawned and never ran. Until meta#450 is fixed
+    there is no slot value this client can safely send.
     """
     if _http_config() is None:
         # Expected on a fresh install — control flow, not a Sentry event.
