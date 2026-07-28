@@ -57,7 +57,7 @@ def test_name():
     assert dispatch_plugin.name == "dispatch"
 
 
-def test_commands_include_all_three():
+def test_commands_include_every_read_command():
     cmds = dispatch_plugin.commands
     assert "dispatch status" in cmds
     assert "dispatch check" in cmds
@@ -829,6 +829,7 @@ def test_command_groups_document_shift():
         ("dispatch shift day.", "day"),
         ("dispatch shift day please", "day"),
         ("please dispatch shift night", "night"),
+        ("thanks, dispatch shift night", "night"),
     ],
 )
 def test_parse_shift_command_reads_the_kind(raw, expected):
@@ -995,3 +996,49 @@ def test_matcher_routes_a_shift_message_to_this_plugin():
     """End-to-end through sandy's own matcher: `commands` must carry the phrase
     or the plugin is never consulted, however good the internal parser is."""
     assert dispatch_plugin in matcher.find_matches("dispatch shift night", [dispatch_plugin])
+
+
+@pytest.mark.parametrize("kind", ["pm-review", "self_fix", "retro-summary"])
+def test_parse_shift_command_preserves_punctuation_inside_the_kind(kind):
+    """The kind must reach dispatchd byte-accurate.
+
+    sandy's `matcher.normalize` deletes every character in `string.punctuation`,
+    so parsing the argument with it would turn `pm-review` into `pmreview` — and
+    dispatchd would answer with a 400 quoting a kind the user never typed. Since
+    the client deliberately does not keep its own copy of the vocabulary
+    (`_SHIFT_KINDS`), corrupting the kind on the way out would defeat the point:
+    a kind added server-side is supposed to just work.
+    """
+    assert dispatch_plugin._parse_shift_command(f"dispatch shift {kind}").kind == kind
+
+
+def test_parse_shift_command_on_an_unrelated_message_offers_help():
+    """Reachable only by direct call — `handle` gates on `_is_shift_command`
+    first — but the branch is the parser's contract, so it gets a test."""
+    parsed = dispatch_plugin._parse_shift_command("dispatch frobnicate")
+    assert parsed.kind is None
+    assert parsed.error == dispatch_plugin._SHIFT_HELP
+
+
+@pytest.mark.parametrize("message", ["dispatch shift", "dispatch shift day 9am"])
+def test_shift_refusals_never_reach_the_endpoint(http_backend, monkeypatch, message):
+    """The guarantee is the wiring, not the parser return value.
+
+    A shift that can't be resolved must cost zero calls — sending a half-read
+    command is how meta#450 turns into a run that reports spawned and never
+    ran. Asserting through `handle` covers the `_run_shift` guard that the
+    parser-level tests do not.
+    """
+    calls = _stub_post(monkeypatch, _shift_envelope("day"))
+    resp = dispatch_plugin.handle(message, "tom")
+    assert calls == []
+    assert resp["title"] == "Dispatch Shift"
+
+
+def test_shift_help_lists_kinds_from_the_single_source():
+    """`command_groups` and the help text must agree — they are the only two
+    places the vocabulary is written, and both derive from `_SHIFT_KINDS`."""
+    row = dispatch_plugin.command_groups["dispatch shift"][0]
+    for kind in dispatch_plugin._SHIFT_KINDS:
+        assert kind in row
+        assert kind in dispatch_plugin._SHIFT_HELP

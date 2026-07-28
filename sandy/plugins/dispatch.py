@@ -41,7 +41,6 @@ import urllib.error
 import urllib.request
 from typing import Callable, NamedTuple, NotRequired, TypedDict
 
-from sandy.matcher import normalize
 from sandy.observability import capture
 
 name = "dispatch"
@@ -53,13 +52,28 @@ commands = [
     "dispatch shift",
 ]
 
+# Listed for humans only — dispatchd owns the authoritative vocabulary
+# (`SHIFT_KINDS` in metaframework `dispatchd/actions.py`). Deliberately NOT
+# used to validate: a client-side allowlist drifts into refusing a kind the
+# server has since added, and a false refusal is a worse failure than one
+# wasted round trip. dispatchd's 400 already names the valid set, so an unknown
+# kind is answered by `_write_http_error_message` echoing it. That makes this
+# tuple purely documentation — if it goes stale the help text is mildly wrong
+# and nothing breaks.
+#
+# This is deliberately unlike `dispatch work`, which *does* check its argument
+# client-side (`_GITHUB_TARGET_RE`). The two are different categories: a GitHub
+# URL is a *shape*, and shapes don't drift; a shift kind is membership in a
+# server-owned enum, which does. Please don't "fix" the inconsistency.
+_SHIFT_KINDS = ("night", "day", "wrapup", "pmreview", "sanity", "selffix")
+
 # `dispatch work` and `dispatch shift` are useless without an argument, so each
 # gets its own help row naming the argument instead of sitting as a bare leaf
 # next to the three read commands (the `command_groups` convention from
 # itguy#131).
 command_groups = {
     "dispatch work": ["dispatch work <github issue or PR URL>"],
-    "dispatch shift": ["dispatch shift <night|day|wrapup|pmreview|sanity|selffix>"],
+    "dispatch shift": [f"dispatch shift <{'|'.join(_SHIFT_KINDS)}>"],
 }
 
 _HTTP_TIMEOUT_SECONDS = 5
@@ -79,6 +93,23 @@ _SPAWN_CAVEAT = (
     "Heads up: 202 means it was spawned, not that it's running — a "
     "scheduled shift can still be holding the lock. Run `dispatch check` "
     "in a minute to confirm it took."
+)
+
+# A 409 reads the same whichever endpoint refused, so both write commands share
+# the copy rather than drifting apart.
+_BUSY_TEXT = (
+    "dispatchd already has a run in flight, so it didn't start another one. "
+    "Try `dispatch check` to see what it's busy with, then re-send once "
+    "that clears."
+)
+
+# Polite framing and sentence punctuation, stripped from an argument-bearing
+# command without touching the argument itself. `sandy.matcher.normalize` does
+# more than this (it deletes ALL punctuation) and is used for routing; see
+# `_tidy` for why an argument needs the gentler treatment.
+_LEADING_POLITE_RE = re.compile(r"^(?:(?:please|thanks|thank\s+you)[\s,]+)+", re.IGNORECASE)
+_TRAILING_NOISE_RE = re.compile(
+    r"(?:[\s,]+(?:please|thanks|thank\s+you)|[.!?,;:]+)+$", re.IGNORECASE
 )
 
 
@@ -113,8 +144,9 @@ class WorkTarget(TypedDict, total=False):
 class EnvelopeData(TypedDict, total=False):
     """Union of the ``data`` payloads across the endpoints we call:
     ``text`` for /v1/dispatch/status and /v1/dispatch/pm-inbox,
-    ``status`` + ``in_flight`` for /v1/health, and the run handshake
-    (``run_id`` + ``target``) for /v1/dispatch/work."""
+    ``status`` + ``in_flight`` for /v1/health, the run handshake
+    (``run_id`` + ``target``) for /v1/dispatch/work, and the shift
+    handshake (``run_id`` + ``kind`` + ``slot``) for /v1/dispatch/shift."""
 
     text: str
     status: str
@@ -123,6 +155,8 @@ class EnvelopeData(TypedDict, total=False):
     url: str
     target: WorkTarget
     started_at: str
+    kind: str
+    slot: str | None
 
 
 class Envelope(TypedDict, total=False):
@@ -345,11 +379,7 @@ _WORK_ERROR_TEXT: dict[str, str] = {
         "won't clone one for you. Clone it under the work directory, then "
         "re-send."
     ),
-    "conflict": (
-        "dispatchd already has a run in flight, so it didn't start another one. "
-        "Try `dispatch check` to see what it's busy with, then re-send once "
-        "that clears."
-    ),
+    "conflict": _BUSY_TEXT,
 }
 
 
@@ -521,16 +551,6 @@ _SHIFT_TITLE = "Dispatch Shift"
 # Anchored so this matcher can never swallow "dispatch status"/"check"/"pm".
 _SHIFT_COMMAND_RE = re.compile(r"^dispatch\s+shift\b\s*(?P<rest>.*)$", re.IGNORECASE | re.DOTALL)
 
-# Listed for humans only — dispatchd owns the authoritative vocabulary
-# (`SHIFT_KINDS` in metaframework `dispatchd/actions.py`). Deliberately NOT
-# used to validate: a client-side allowlist drifts into refusing a kind the
-# server has since added, and a false refusal is a worse failure than one
-# wasted round trip. dispatchd's 400 already names the valid set, so an
-# unknown kind is answered by `_write_http_error_message` echoing it. That
-# makes this tuple purely documentation — if it goes stale the help text is
-# mildly wrong, and nothing breaks.
-_SHIFT_KINDS = ("night", "day", "wrapup", "pmreview", "sanity", "selffix")
-
 _SHIFT_HELP = (
     "`dispatch shift <kind>` runs a Dispatch shift on the Mac.\n"
     f"Kinds: {', '.join(_SHIFT_KINDS)}.\n"
@@ -543,11 +563,7 @@ _SHIFT_ERROR_TEXT: dict[str, str] = {
         'a shift. Add "shift" to its caps in dispatchd\'s config and reload the '
         "launchd unit."
     ),
-    "conflict": (
-        "dispatchd already has a run in flight, so it didn't start another one. "
-        "Try `dispatch check` to see what it's busy with, then re-send once "
-        "that clears."
-    ),
+    "conflict": _BUSY_TEXT,
     # `bad_request` is intentionally absent — see _SHIFT_KINDS.
 }
 
@@ -563,31 +579,43 @@ class _ShiftParse(NamedTuple):
     error: str | None = None
 
 
+def _tidy(text: str) -> str:
+    """Strip the polite framing and sentence punctuation Slack messages carry.
+
+    Deliberately *not* :func:`~sandy.matcher.normalize`. Normalize is right for
+    routing but wrong for reading an argument: it deletes every character in
+    ``string.punctuation``, so a hyphenated shift kind silently loses its
+    hyphen — ``pm-review`` arrives at dispatchd as ``pmreview`` and comes back
+    as a 400 quoting a string the user never typed. Since the whole point of
+    letting the server own the vocabulary (see ``_SHIFT_KINDS``) is that a kind
+    added server-side just works, corrupting the kind on the way out would
+    defeat it. This strips only the framing and leaves the words intact.
+    """
+    cleaned = _LEADING_POLITE_RE.sub("", text.strip())
+    return _TRAILING_NOISE_RE.sub("", cleaned).strip()
+
+
 def _is_shift_command(text: str) -> bool:
     """True when this message is addressed to ``dispatch shift``."""
-    return _SHIFT_COMMAND_RE.match(normalize(text)) is not None
+    return _SHIFT_COMMAND_RE.match(_tidy(text)) is not None
 
 
 def _parse_shift_command(text: str) -> _ShiftParse:
     """Read the shift kind out of a ``dispatch shift <kind>`` message.
 
-    The whole message is run through sandy's own
-    :func:`~sandy.matcher.normalize` before matching, because ``handle``
-    receives the *raw* Slack text while routing happened on the normalized
-    form — so without this the plugin can be handed a message the framework
-    matched and then fail to recognise it. Normalizing lowercases, drops
-    punctuation and strips polite framing, which is what lets "Dispatch Shift
-    Night", "dispatch shift day." and "please dispatch shift night" all
-    resolve. Every token this command takes is a bare lowercase word, so
-    nothing is lost to normalization — unlike ``dispatch work``, whose URL
-    argument must be read from the raw text.
+    The message is tidied (not normalized — see :func:`_tidy`) before matching,
+    because ``handle`` receives the *raw* Slack text while routing happened on
+    the normalized form. Without that the plugin could be handed a message the
+    framework matched and then fail to recognise it. Tidying is what lets
+    "Dispatch Shift Night", "dispatch shift day." and "please dispatch shift
+    night" all resolve, while leaving the kind itself byte-accurate.
 
     A second word is refused rather than dropped. It would be read as a
     ``slot``, and no slot value is safe to send today (see ``_run_shift``);
     silently ignoring an argument the user typed is the bug the `dispatch`
     wrapper itself had to fix in metaframework #284.
     """
-    match = _SHIFT_COMMAND_RE.match(normalize(text))
+    match = _SHIFT_COMMAND_RE.match(_tidy(text))
     if match is None:
         return _ShiftParse(error=_SHIFT_HELP)
 
@@ -603,7 +631,9 @@ def _parse_shift_command(text: str) -> _ShiftParse:
                 f"`dispatch shift {words[0]}`."
             )
         )
-    return _ShiftParse(kind=words[0])
+    # Case is the one thing safe to fold: dispatchd's kinds are all lowercase,
+    # and Slack capitalizes the first word of a sentence for you.
+    return _ShiftParse(kind=words[0].lower())
 
 
 def _format_shift(envelope: Envelope) -> str:
