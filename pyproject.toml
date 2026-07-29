@@ -24,6 +24,11 @@ omit = ["sandy/plugins/__init__.py", "sandy/__init__.py"]
 
 [tool.ruff]
 line-length = 100
+# Honour the exclusions below even when a file is named explicitly on the command
+# line. Without this, `ruff format README.md` -- or an editor's format-on-save
+# against an open Markdown file -- rewrites the very docs the exclude protects,
+# because ruff treats an explicit path as an override of its discovery rules.
+force-exclude = true
 
 [tool.ruff.format]
 # ruff 0.16.0 started formatting Python code blocks inside Markdown files. The
@@ -37,7 +42,7 @@ line-length = 100
 # column, injects blank lines into illustrative fragments, and rewrites dated
 # planning records under docs/plans/ that are historical documents, not source.
 #
-# This is a scope decision, not a style one -- flip it (delete these two lines,
+# This is a scope decision, not a style one -- flip it (drop the exclude below,
 # run `uv run ruff format .`) if we ever decide docs *should* be formatter-owned.
 exclude = ["*.md"]
 
