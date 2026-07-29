@@ -65,7 +65,18 @@ jobs:
       - name: Run Claude Code Review
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Workload identity federation — the workflow's GitHub OIDC token is
+          # exchanged for a short-lived Anthropic token at run time. These are
+          # non-secret identifiers, so they live here rather than in a repo
+          # secret (this account has no GitHub org, hence no org-level secrets).
+          # Do NOT reintroduce claude_code_oauth_token: an unset secret
+          # interpolates to "" and still outranks federation in the credential
+          # precedence chain, which is what broke every run before #160.
+          anthropic_federation_rule_id: fdrl_01BpyGJ87yK8LQ5ZfJHywTBD
+          anthropic_organization_id: 8ced06a4-07a8-4c3b-870e-5167c3b780ff
+          anthropic_service_account_id: svac_012Z8Hhb543YrEgfW1YAw5oB
+          # Required because the federation rule spans all workspaces.
+          anthropic_workspace_id: wrkspc_018qXKAKWdEW4Dmbfc33HcbR
           allowed_bots: 'metaframework-dispatch-bot'
           prompt: |
             Review this pull request for:
