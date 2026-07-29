@@ -25,6 +25,22 @@ omit = ["sandy/plugins/__init__.py", "sandy/__init__.py"]
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.format]
+# ruff 0.16.0 started formatting Python code blocks inside Markdown files. The
+# bump arrived as a routine Dependabot patch (0.15.22 -> 0.16.0, d856864) and
+# silently widened the formatter's scope from our source to our prose: five docs
+# nobody had edited in weeks began failing CI's `ruff format --check .`, and
+# `main` was red for a day (sandy#159).
+#
+# We opt back out rather than reformat the docs, because what the formatter wants
+# to do to them is a net loss: it collapses README's deliberately aligned comment
+# column, injects blank lines into illustrative fragments, and rewrites dated
+# planning records under docs/plans/ that are historical documents, not source.
+#
+# This is a scope decision, not a style one -- flip it (delete these two lines,
+# run `uv run ruff format .`) if we ever decide docs *should* be formatter-owned.
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = ["E", "F", "C90"]
 
