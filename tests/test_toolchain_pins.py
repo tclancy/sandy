@@ -19,18 +19,18 @@ actually understood.
 
 from __future__ import annotations
 
-import re
 import tomllib
 from pathlib import Path
 
 import pytest
 import yaml
 
+from tests.test_ruff_format_scope import declared_ruff_floor
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PRE_COMMIT_CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
 LOCKFILE = REPO_ROOT / "uv.lock"
-PYPROJECT = REPO_ROOT / "pyproject.toml"
 DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
 
 RUFF_HOOK_REPO = "https://github.com/astral-sh/ruff-pre-commit"
@@ -56,10 +56,16 @@ def test_ruff_pre_commit_rev_matches_the_locked_ruff() -> None:
     """The hook's tag and the lockfile's version must name the same release.
 
     `ruff-pre-commit` tags mirror ruff's own versions with a `v` prefix, so the
-    comparison is exact rather than a floor check — a hook one patch behind is
-    still a different linter, and ruff has shipped behaviour changes in patch
-    releases (0.16.0 taught the *formatter* to read Markdown, which is what
-    broke this repo's `main` on 07-28).
+    comparison is exact rather than a floor check: a hook one release behind is
+    still a different linter, and "newer than the floor" says nothing about
+    whether the two agree.
+
+    Deliberately NOT the rationale: the 0.16.0 formatter change that broke this
+    repo's `main` on 07-28. #161 makes the point explicitly and it is worth
+    keeping straight — the hooks declare `types_or: [python, pyi, jupyter]` at
+    every version, so pre-commit is never handed a `.md` file and no rev bump
+    would have caught that bug. `[tool.ruff.format] exclude` is what covers it.
+    This test is about local and CI disagreeing, nothing else.
     """
     rev = _hook_rev(RUFF_HOOK_REPO)
     assert rev.startswith("v"), f"unexpected tag shape {rev!r} — expected a leading 'v'"
@@ -76,18 +82,18 @@ def test_locked_ruff_satisfies_the_declared_floor() -> None:
     in pyproject without re-locking, so the lockfile — and therefore CI, and
     therefore this file's other assertion — is pinned below what the project
     says it needs.
+
+    Reuses `declared_ruff_floor()` rather than parsing the spec again. A second
+    parser here was anchored on `startswith("ruff")`, which would silently pick
+    a `ruff-lsp>=…` floor and compare ruff against a different package; the
+    existing helper's `re.fullmatch` cannot. Two parsers for one field is how a
+    check ends up passing against something it never actually read.
     """
-    project = tomllib.loads(PYPROJECT.read_text())
-    dev_deps = project["dependency-groups"]["dev"]
-    spec = next(d for d in dev_deps if d.replace("-", "_").startswith("ruff"))
-    floor = re.search(r">=\s*([0-9][0-9a-zA-Z.]*)", spec)
-    assert floor, f"no >= floor in {spec!r} — this test assumes one is declared"
-
-    def parts(v: str) -> tuple[int, ...]:
-        return tuple(int(n) for n in v.split(".") if n.isdigit())
-
-    assert parts(_locked_version("ruff")) >= parts(floor.group(1)), (
-        f"uv.lock pins ruff {_locked_version('ruff')} below pyproject's floor {floor.group(1)}"
+    floor = declared_ruff_floor()
+    locked = tuple(int(n) for n in _locked_version("ruff").split(".") if n.isdigit())
+    assert locked >= floor, (
+        f"uv.lock pins ruff {'.'.join(map(str, locked))} below pyproject's "
+        f"floor {'.'.join(map(str, floor))}"
     )
 
 
