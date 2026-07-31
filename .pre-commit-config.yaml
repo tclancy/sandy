@@ -8,18 +8,42 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Keep this rev in lockstep with the ruff pinned in uv.lock — the hook runs
-    # its own copy of ruff, so a skew means local and CI lint with different
-    # binaries. tests/test_toolchain_pins.py fails if the two drift apart.
-    rev: v0.16.0
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
   - repo: local
     hooks:
+      # ruff runs from THIS project's environment, not from a rev-pinned copy of
+      # astral-sh/ruff-pre-commit. That hook installs its tag's own ruff into an
+      # isolated env, which is a second version of the linter that has to be kept
+      # in lockstep with uv.lock by hand — and Dependabot treats `pip` and
+      # `pre-commit` as separate ecosystems, so a ruff release arrives as two PRs
+      # that cannot land atomically. The agreement test went red on each of them
+      # in turn, roughly weekly (#166). Sourcing the binary from uv.lock makes
+      # the skew impossible instead of merely detected.
+      #
+      # --frozen, not --locked: a bare `uv run` re-resolves against PyPI and
+      # rewrites the tracked uv.lock as a side effect, which pre-commit then
+      # fails as "files were modified by this hook"; --locked would instead abort
+      # the commit on a stale lock. Hooks want --frozen, CI wants --locked, and
+      # .github/workflows/ci.yml carries the latter.
+      #
+      # types_or mirrors what astral-sh/ruff-pre-commit declared, so the file set
+      # is unchanged by this swap. Note it excludes Markdown at every ruff
+      # version — the 0.16.0 Markdown-discovery break (#159) is covered by
+      # `[tool.ruff.format] exclude` plus tests/test_ruff_format_scope.py, not
+      # by anything here.
+      - id: ruff
+        name: ruff check
+        entry: uv run --frozen ruff check --fix
+        language: system
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --frozen ruff format
+        language: system
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+
       - id: pytest-cov
         name: pytest (with coverage)
         # --frozen: a bare `uv run` re-resolves against PyPI and rewrites the

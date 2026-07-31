@@ -18,8 +18,14 @@ jobs:
       - name: Set up Python
         run: uv python install 3.13
 
+      # --locked, not a bare sync: without it uv re-resolves against PyPI and can
+      # install a ruff that is not in the committed lockfile, which would make the
+      # pre-commit hooks' "uv.lock is the single ruff pin" guarantee true of the
+      # file and false of this machine (#166). --locked fails the build on a stale
+      # lock rather than silently repairing it, which is what CI wants; the hooks
+      # use --frozen for the opposite reason.
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
 
       - name: Lint (ruff)
         run: uv run ruff check .

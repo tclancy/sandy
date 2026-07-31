@@ -18,10 +18,13 @@ updates:
     schedule:
       interval: "weekly"
 
-  # The pip ecosystem above does not see .pre-commit-config.yaml, so without
-  # this the ruff hook's rev sits still while ruff itself keeps getting bumped
-  # in the dev group (#161). The two land in separate PRs by design, which is
-  # why tests/test_toolchain_pins.py enforces that they agree once both merge.
+  # Kept, but no longer for ruff. This ecosystem was added under #161 to chase
+  # the astral-sh/ruff-pre-commit rev; #166 deleted that block, so ruff now moves
+  # only via `pip` above. What is left here is pre-commit-hooks, the one
+  # third-party repo still pinned at a rev in .pre-commit-config.yaml — and the
+  # pip ecosystem cannot see that file. Drop this entry if that last pinned repo
+  # ever goes away; tests/test_toolchain_pins.py derives the requirement from
+  # the config rather than hardcoding it, so it will not object.
   - package-ecosystem: "pre-commit"
     directory: "/"
     schedule:
