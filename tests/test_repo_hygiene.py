@@ -63,8 +63,26 @@ NUL_SNIFF_BYTES = 4096
 TEXT_ENCODINGS = ("utf-8", "utf-16-le", "utf-16-be")
 
 # Fraction of decoded characters that must look like text for the head to be
-# accepted as that encoding.
+# accepted as that encoding. Nothing tracked lands near it — every text file in
+# the tree scores 1.00 and the one binary scores 0.40 — so the boundary is
+# pinned by test_the_text_ratio_boundary_is_where_it_claims rather than by any
+# real file. Getting it wrong is no longer catastrophic in either direction:
+# too low and a binary gets decoded, too high and a text file falls through to
+# `scan_bytes_for_marker`, which finds the marker anyway.
 MIN_TEXT_RATIO = 0.90
+
+# The marker as raw bytes, for the binary fallback. UTF-32 is included even
+# though nothing observed emits it: the check is two `in` tests against a
+# 64KB window, so covering it costs nothing and its absence would be another
+# silent miss.
+MARKER_SPELLINGS = tuple(
+    SHOWBOAT_MARKER.encode(codec)
+    for codec in ("utf-8", "utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be")
+)
+
+# Read size for the streaming fallback. Peak memory is one chunk plus the
+# straddle overlap, not the file.
+SCAN_CHUNK_BYTES = 64 * 1024
 
 # Files allowed to contain the marker because describing the rule requires
 # naming it. Repo-root-relative POSIX paths.
@@ -133,6 +151,11 @@ def _text_ratio(decoded: str, *, ascii_only: bool) -> float:
     test says yes to a PNG and the guard starts flagging assets. Real UTF-16
     documents in this repo are ASCII-dominant, so the UTF-16 passes demand ASCII
     and the UTF-8 pass stays permissive enough for accented and CJK prose.
+
+    "Stricter" is not true on every axis: `string.printable` contains `\\x0b` and
+    `\\x0c`, which the UTF-8 branch rejects as non-printable. Harmless — nothing
+    hinges on vertical tab — but the asymmetry is real, so do not read the
+    ASCII branch as a subset of the other.
     """
     if not decoded:
         return 1.0
@@ -155,16 +178,20 @@ def _text_ratio(decoded: str, *, ascii_only: bool) -> float:
 def detect_text_encoding(head: bytes) -> str | None:
     """The encoding that reads `head` as text, or None if it looks binary.
 
-    Replaces the old `b"\0" in head` sniff, which was correct for genuine
+    Replaces the old `b"\\0" in head` sniff, which was correct for genuine
     assets and wrong for two realistic documents (sandy#165): a showboat doc
     whose *captured output* contains a NUL, and any doc saved as UTF-16.
     """
     for encoding in TEXT_ENCODINGS:
         # No odd-length trim before the UTF-16 passes: it was here, and mutation
         # testing showed it inert. `errors="replace"` already turns a dangling
-        # final byte into one U+FFFD, and one character cannot move a 4096-byte
-        # head across MIN_TEXT_RATIO. Verified against a UTF-16 doc plus a stray
-        # trailing byte — trimmed and untrimmed both classify `utf-16-le`. A
+        # final byte into one U+FFFD. On a *full* 4096-byte head one character
+        # cannot cross MIN_TEXT_RATIO; on a very short head it can (an 8-char
+        # UTF-16 doc plus a stray byte scores 0.889, a 9-char one 0.900), but a
+        # real showboat doc carries the 17-character marker and clears it either
+        # way. Verified trimmed and untrimmed on a UTF-16 doc plus a stray byte:
+        # both classify `utf-16-le`. And since #165 a misclassified head is no
+        # longer fatal — `scan_bytes_for_marker` still reads the file. A
         # redundant guard is an untested guard, so it is gone rather than
         # decorative.
         if head_text_ratio(head, encoding) >= MIN_TEXT_RATIO:
@@ -207,14 +234,50 @@ def is_showboat_document(text: str) -> bool:
     return SHOWBOAT_MARKER in text
 
 
+def scan_bytes_for_marker(handle: IO[bytes]) -> bool:
+    """True if the marker appears anywhere in `handle`, in any spelling.
+
+    The fallback for a file the decoder called binary. Encoding detection
+    decides *how to decode*, never *whether to look* — gating the marker search
+    on decodability is a silent false negative, and this module exists to
+    prevent exactly that.
+
+    Streams in chunks with an overlap, so peak memory is one chunk regardless of
+    file size. Total bytes read does grow to the file size for binaries, which
+    is a deliberate trade against PR #155's read bound: #155 optimised the cost
+    of rejecting an asset, and sandy#165 observes that a false positive here
+    costs one line in ALLOWED while a false negative is invisible forever.
+    """
+    overlap = max(len(spelling) for spelling in MARKER_SPELLINGS) - 1
+    tail = b""
+    while chunk := handle.read(SCAN_CHUNK_BYTES):
+        window = tail + chunk
+        if any(spelling in window for spelling in MARKER_SPELLINGS):
+            return True
+        # Carry the boundary so a marker straddling two chunks is still found.
+        tail = window[-overlap:]
+    return False
+
+
+def path_holds_marker(path: Openable) -> bool:
+    """True if this file is a committed showboat document, by any route."""
+    text = read_text_or_none(path)
+    if text is not None:
+        return is_showboat_document(text)
+    try:
+        with path.open("rb") as handle:
+            return scan_bytes_for_marker(handle)
+    except OSError:
+        return False
+
+
 def find_showboat_artifacts(root: Path, paths: list[str]) -> list[str]:
     """Tracked paths that are committed showboat documents."""
     offenders = []
     for rel in paths:
         if rel in ALLOWED:
             continue
-        text = read_text_or_none(root / rel)
-        if text is not None and is_showboat_document(text):
+        if path_holds_marker(root / rel):
             offenders.append(rel)
     return offenders
 
@@ -265,10 +328,16 @@ def test_find_skips_the_allowlist(tmp_path):
     """This module quotes the marker to document the rule; it is not an artifact.
 
     The binary half of this test moved to `test_a_genuine_binary_is_still_skipped`
-    with a realistic payload. Its old fixture — `b"\\x89PNG\\x00\\x00"` glued to a
-    printable marker — is 88% ASCII, i.e. a text file carrying a couple of NULs,
-    which sandy#165 hole 1 says must now be CAUGHT. Asserting both here would
-    have pinned the two requirements against each other.
+    with a high-entropy payload. Its old fixture — `b"\\x89PNG\\x00\\x00"` glued to
+    a printable marker — scores 0.8966, i.e. it sat 0.003 under the floor, so a
+    one-character change to the marker id would have flipped it from binary to
+    text and silently changed what this test asserted.
+
+    An earlier revision of this docstring claimed the old fixture "must now be
+    CAUGHT" and that keeping it would pin two requirements against each other.
+    That was wrong and the code review caught it: the deleted assertion still
+    passes against this implementation. The real reason to replace it is
+    brittleness, which is a weaker claim and the true one.
     """
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_repo_hygiene.py").write_text(f"{SHOWBOAT_MARKER} x -->")
@@ -375,20 +444,33 @@ def test_a_utf16_showboat_doc_is_caught(tmp_path, encoding):
 def test_a_genuine_binary_is_still_skipped(tmp_path):
     """DoD 3: real assets stay out of the scan.
 
-    The payload is high-entropy rather than the handful of ASCII bytes the
-    previous fixture used, because a few binary bytes wrapped around a printable
-    string is not a binary — it is a text file with NULs, which is exactly what
-    hole 1 above says must now be caught. Keeping the old fixture would have
-    forced the two requirements into contradiction.
+    A genuine asset carries no marker in any spelling, so neither the decode
+    path nor the byte-scan fallback has anything to find. That — not the
+    binary classification on its own — is what keeps assets out of the report.
     """
     logo = tmp_path / "logo.png"
     logo.write_bytes(
-        b"\x89PNG\r\n\x1a\n"
-        + bytes((i * 7 + 11) % 256 for i in range(NUL_SNIFF_BYTES * 2))
-        + f"{SHOWBOAT_MARKER} x -->".encode()
+        b"\x89PNG\r\n\x1a\n" + bytes((i * 7 + 11) % 256 for i in range(NUL_SNIFF_BYTES * 2))
     )
 
     assert find_showboat_artifacts(tmp_path, ["logo.png"]) == []
+
+
+def test_a_binary_that_really_does_carry_the_marker_is_reported(tmp_path):
+    """The deliberate false positive, pinned so nobody 'fixes' it later.
+
+    sandy#165 weighs the two errors explicitly: a false positive costs one line
+    in ALLOWED, a false negative is silent forever. So once a file contains the
+    marker bytes, it is reported whatever its head looks like. This is the
+    assertion the old `logo.png` fixture used to contradict.
+    """
+    odd = tmp_path / "weird.bin"
+    odd.write_bytes(
+        bytes((i * 31 + 7) % 256 for i in range(NUL_SNIFF_BYTES * 2))
+        + f"{SHOWBOAT_MARKER} x -->".encode()
+    )
+
+    assert find_showboat_artifacts(tmp_path, ["weird.bin"]) == ["weird.bin"]
 
 
 def test_the_real_tracked_binaries_are_still_classified_binary():
@@ -433,6 +515,135 @@ def test_binary_stays_well_clear_of_the_text_floor():
         "margin has narrowed, which usually means the decoder now discards "
         "undecodable bytes instead of replacing them"
     )
+
+
+@pytest.mark.parametrize(
+    "label,payload",
+    [
+        # Each of these was CAUGHT by the pre-#165 NUL sniff and MISSED by the
+        # first version of the decode classifier, which returned None for an
+        # undecodable head and never looked at the file. Found by code review:
+        # the fix for two narrow false negatives had opened five broader ones.
+        (
+            "latin-1 prose, 11% accented",
+            ("# Café\n" + "é" * 110 + "a" * 890).encode("latin-1") + MARKER_SPELLINGS[0],
+        ),
+        (
+            "cp1251 prose",
+            ("# Отчёт\n" + "Привет мир. " * 90).encode("cp1251") + MARKER_SPELLINGS[0],
+        ),
+        (
+            "ANSI progress-bar capture",
+            ("# run\n" + "\x1b[32m#\x1b[0m" * 400).encode() + MARKER_SPELLINGS[0],
+        ),
+        (
+            "captured raw binary blob",
+            b"# capture\n$ xxd thing\n" + bytes(range(256)) * 3 + MARKER_SPELLINGS[0],
+        ),
+        # The marker itself must be in the document's own encoding, or the case
+        # is satisfied by the ASCII spelling and proves nothing about UTF-32 —
+        # which is exactly how the first version of this test let a
+        # "drop UTF-32" mutation survive.
+        ("UTF-32-LE document", f"# Demo\n{SHOWBOAT_MARKER} abc -->\n".encode("utf-32-le")),
+        ("UTF-32-BE document", f"# Demo\n{SHOWBOAT_MARKER} abc -->\n".encode("utf-32-be")),
+    ],
+)
+def test_a_marker_is_found_whatever_the_head_looks_like(tmp_path, label, payload):
+    """Encoding detection decides HOW to decode, never WHETHER to scan.
+
+    Showboat captures arbitrary command stdout, so the content most likely to
+    defeat a decoder is exactly the content this guard most needs to read.
+    Gating the marker search on decodability makes the guard worse at its one
+    job than the NUL sniff it replaced.
+    """
+    doc = tmp_path / "capture.md"
+    doc.write_bytes(payload)
+
+    assert find_showboat_artifacts(tmp_path, ["capture.md"]) == ["capture.md"]
+
+
+def test_a_marker_straddling_two_scan_chunks_is_found(tmp_path):
+    """The streaming fallback carries an overlap; without it this is a miss.
+
+    Padding is sized so the marker begins one byte before the first chunk
+    boundary, which is the only offset at which the bug appears — a scan written
+    without the overlap passes every other test in this module.
+    """
+    doc = tmp_path / "big.bin"
+    marker = f"{SHOWBOAT_MARKER} abc -->".encode()
+    padding = bytes((i * 31 + 7) % 256 for i in range(SCAN_CHUNK_BYTES - 1))
+    doc.write_bytes(padding + marker + b"\x00" * 10)
+    assert read_text_or_none(doc) is None, "fixture must take the binary path"
+
+    assert find_showboat_artifacts(tmp_path, ["big.bin"]) == ["big.bin"]
+
+
+def test_the_scan_fallback_holds_one_chunk_not_the_file(tmp_path):
+    """Peak memory, which is the property PR #155 actually argued for.
+
+    Total bytes read does grow to the file size on the fallback path — that is
+    the deliberate #165 trade. What must not regress is pulling a whole asset
+    into memory at once.
+    """
+    doc = tmp_path / "big.bin"
+    doc.write_bytes(bytes((i * 31 + 7) % 256 for i in range(SCAN_CHUNK_BYTES * 8)))
+    peak = 0
+
+    with doc.open("rb") as handle:
+        original = handle.read
+
+        def watched(size=-1):
+            nonlocal peak
+            chunk = original(size)
+            peak = max(peak, len(chunk))
+            return chunk
+
+        handle.read = watched
+        assert scan_bytes_for_marker(handle) is False
+
+    assert peak <= SCAN_CHUNK_BYTES, f"read {peak} bytes at once, over the {SCAN_CHUNK_BYTES} chunk"
+
+
+@pytest.mark.parametrize(
+    "ratio,expected", [(0.95, "utf-8"), (0.91, "utf-8"), (0.89, None), (0.50, None)]
+)
+def test_the_text_ratio_boundary_is_where_it_claims(ratio, expected):
+    """No tracked file sits near MIN_TEXT_RATIO, so nothing else pins it.
+
+    Every text file in the tree scores 1.00 and the one binary scores 0.40, so
+    the constant could be moved a long way in either direction with the rest of
+    this suite still green.
+    """
+    total = 1000
+    head = (b"a" * int(total * ratio)) + (b"\x81" * (total - int(total * ratio)))
+
+    assert detect_text_encoding(head) == expected
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-le", "utf-16-be"])
+def test_a_utf16_document_decodes_rather_than_falling_through(tmp_path, encoding):
+    """The decode layer must actually decode UTF-16, not lean on the backstop.
+
+    `find_showboat_artifacts` would catch these anyway via
+    `scan_bytes_for_marker`, so every *guard* assertion stays green if UTF-16 is
+    dropped from TEXT_ENCODINGS — two mutations survived on exactly that. But
+    `read_text_or_none`'s contract is "decoded contents", and a caller that got
+    `None` (or UTF-8 mojibake) for a perfectly readable document would be wrong
+    regardless of what the guard concludes. This is the assertion that makes the
+    decode layer load-bearing instead of decorative.
+
+    The two layers are deliberate: decoding is the fast, typical path and keeps
+    PR #155's bounded rejection for ordinary assets; the byte scan is the
+    backstop for everything a decoder cannot make sense of.
+    """
+    doc = tmp_path / "demo.md"
+    doc.write_bytes(f"# Demo\n\n{SHOWBOAT_MARKER} abc -->\n".encode(encoding))
+
+    text = read_text_or_none(doc)
+
+    assert text is not None, "a readable UTF-16 document decoded to None"
+    assert "# Demo" in text, f"decoded as mojibake: {text[:40]!r}"
+    assert is_showboat_document(text)
 
 
 def test_international_text_is_not_mistaken_for_binary(tmp_path):
