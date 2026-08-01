@@ -224,16 +224,22 @@ Add a config section to `sandy.toml.example` for any API keys your plugin needs.
 
 ## Development
 
+`uv.lock` is the single source of truth for the toolchain — the pre-commit ruff
+hooks and CI both install from it, so nothing here should re-resolve it. That is
+what `--locked` / `--frozen` buy: a bare `uv sync` or `uv run` silently rewrites
+the tracked lockfile as a side effect.
+
 ```bash
-# Install dev dependencies
-uv sync --all-groups
+# Install dev dependencies (--locked fails loudly if uv.lock is stale,
+# rather than quietly rewriting it)
+uv sync --locked --all-groups
 
 # Run tests
-uv run pytest
+uv run --frozen pytest
 
 # Lint and format
-uv run ruff check --fix .
-uv run ruff format .
+uv run --frozen ruff check --fix .
+uv run --frozen ruff format .
 
 # Pre-commit hooks (run automatically on commit)
 pre-commit install

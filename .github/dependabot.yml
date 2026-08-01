@@ -1,6 +1,18 @@
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  # "uv", not "pip". The pip ecosystem bumps the floor in pyproject.toml and
+  # never touches uv.lock — measured, not assumed: all 15 python-deps commits in
+  # this repo's history (d856864, 8937dd7, eb5c20a, 9b241ea, 79d9fae, …) have a
+  # one-file diff. That was survivable while CI re-resolved at run time, but it
+  # is fatal now that #166 makes uv.lock the single ruff pin and CI installs with
+  # --locked: every weekly Dependabot PR would hard-fail at the install step,
+  # before lint or tests ever run. (uv.lock records the *specifier*, so a floor
+  # bump alone invalidates it even when the pinned version still satisfies it.)
+  #
+  # The uv ecosystem updates pyproject.toml and uv.lock together, so the single
+  # pin actually moves on its own. Verified in the fleet rather than trusted:
+  # canvasoptimizer has six Dependabot commits touching both files.
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -18,10 +30,13 @@ updates:
     schedule:
       interval: "weekly"
 
-  # The pip ecosystem above does not see .pre-commit-config.yaml, so without
-  # this the ruff hook's rev sits still while ruff itself keeps getting bumped
-  # in the dev group (#161). The two land in separate PRs by design, which is
-  # why tests/test_toolchain_pins.py enforces that they agree once both merge.
+  # Kept, but no longer for ruff. This ecosystem was added under #161 to chase
+  # the astral-sh/ruff-pre-commit rev; #166 deleted that block, so ruff now moves
+  # via the uv ecosystem above. What is left here is pre-commit-hooks, the one
+  # third-party repo still pinned at a rev in .pre-commit-config.yaml — and no
+  # Python ecosystem can see that file. Drop this entry if that last pinned repo
+  # ever goes away; tests/test_toolchain_pins.py derives the requirement from
+  # the config rather than hardcoding it, so it will not object.
   - package-ecosystem: "pre-commit"
     directory: "/"
     schedule:
