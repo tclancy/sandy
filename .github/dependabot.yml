@@ -17,3 +17,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
+  # The pip ecosystem above does not see .pre-commit-config.yaml, so without
+  # this the ruff hook's rev sits still while ruff itself keeps getting bumped
+  # in the dev group (#161). The two land in separate PRs by design, which is
+  # why tests/test_toolchain_pins.py enforces that they agree once both merge.
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
