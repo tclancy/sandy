@@ -42,6 +42,13 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
+      # Without this the three mcp__github_ci__* tools stay in the resolved
+      # allowedTools while their MCP server was never registered — the
+      # track_progress trap below, in reverse. Every call to them is then an
+      # automatic denial, and denials burn turns against --max-turns. It also
+      # gives the reviewer a way to READ CI status, which is the cheap
+      # alternative to it trying to run the test suite itself (see the prompt).
+      actions: read
 
     steps:
       - name: Resolve PR head SHA
@@ -92,6 +99,12 @@ jobs:
             Use the repository's CLAUDE.md for guidance on style and conventions.
             Be constructive and specific.
 
+            Do NOT run the test suite, linters, or any build step. The `ci`
+            workflow already does that on this same commit, and this job has no
+            dependencies installed — every attempt is a denied tool call that
+            costs a turn and returns nothing. Read the results with
+            mcp__github_ci__get_ci_status instead.
+
             Post findings that point at specific lines with
             mcp__github_inline_comment__create_inline_comment. Use `gh pr comment`
             for the overall summary, or for findings with no single line to anchor
@@ -103,4 +116,19 @@ jobs:
           # finding otherwise retries until the turn limit, burning Actions
           # minutes on a job that produces nothing (the account has exhausted its
           # included minutes two months running).
-          claude_args: '--allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)" --max-turns 25'
+          #
+          # TodoWrite is allow-listed because the `claude_code` preset system
+          # prompt drives a todo list on any multi-step task, and a code review
+          # is exactly that shape — without it every such call is denied.
+          #
+          # --max-turns was 25 and the gate was starving on it. Turn/denial
+          # counts from the result JSON of the last three runs:
+          #   Jul 30 run 30584453644  success        20 turns   6 denials
+          #   Jul 31 run 30602662980  error_max_turns 26 turns 13 denials
+          #   Jul 31 run 30634296456  error_max_turns 26 turns  9 denials
+          # 40 restores headroom. The denials are the actual defect and are
+          # addressed above; the ceiling is the safety margin, not the fix. If
+          # permission_denials_count does not drop to ~0 on the next run, the
+          # remaining denials are unidentified — the action hides the tool
+          # stream, so re-run with `show_full_output: true` to name them.
+          claude_args: '--allowed-tools "mcp__github_inline_comment__create_inline_comment,TodoWrite,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)" --max-turns 40'
