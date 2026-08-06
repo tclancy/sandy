@@ -2,7 +2,13 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    # branches: filters on the BASE ref, so a stacked PR (base = another
+    # claude/ branch) got no CI at all; widen to cover our branch convention.
+    # `edited` covers GitHub's silent retarget to main when the parent branch
+    # merges — the default types miss it (metaframework#490). Cost: title/body
+    # edits also re-trigger CI; accepted.
+    types: [opened, synchronize, reopened, edited]
+    branches: [main, "claude/**"]
   push:
     branches: [main]
 
