@@ -969,12 +969,17 @@ def test_the_conftest_scrub_is_registered_and_actually_scrubs(request, monkeypat
     # silent hole its absence leaves. Kept narrow — the two assertions above use
     # public API, and only this one is pinned to an internal.
     assert "GIT_DIR" in os.environ, "monkeypatch setup above did not take"
-    conftest._scrub_git_env._fixture_function(pytest.MonkeyPatch())
-    assert "GIT_DIR" not in os.environ, (
-        "the _scrub_git_env fixture body ran without scrubbing anything — it is "
-        "registered and autouse but no longer calls scrub_git_env, so every test "
-        "in the suite is unprotected while this module still reports green."
-    )
+    wiring = pytest.MonkeyPatch()
+    try:
+        conftest._scrub_git_env._fixture_function(wiring)
+        assert "GIT_DIR" not in os.environ, (
+            "the _scrub_git_env fixture body ran without scrubbing anything — it "
+            "is registered and autouse but no longer calls scrub_git_env, so "
+            "every test in the suite is unprotected while this module still "
+            "reports green."
+        )
+    finally:
+        wiring.undo()
 
 
 def test_no_showboat_artifact_is_tracked():
