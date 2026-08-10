@@ -7,6 +7,18 @@ import sentry_sdk
 from sentry_sdk.integrations.logging import LoggingIntegration
 
 
+def scrub_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove every `GIT_*` variable from the environment via `monkeypatch`.
+
+    Split out of the fixture below so the behaviour can be tested as a plain
+    function. Testing it through the fixture object would mean reaching into
+    pytest privates (`_fixture_function`), which is a needless version
+    dependency for a four-line loop.
+    """
+    for var in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _scrub_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Drop every inherited `GIT_*` variable for the duration of each test.
@@ -35,8 +47,7 @@ def _scrub_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
     this fixture has run, which is why
     `test_git_dir_in_the_environment_cannot_redirect_the_root` still bites.
     """
-    for var in [k for k in os.environ if k.startswith("GIT_")]:
-        monkeypatch.delenv(var, raising=False)
+    scrub_git_env(monkeypatch)
 
 
 @pytest.fixture

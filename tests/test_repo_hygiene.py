@@ -108,7 +108,10 @@ def git_env() -> dict[str, str]:
     | commit made in | `GIT_DIR` | `GIT_INDEX_FILE` |
     |---|---|---|
     | plain checkout | *unset* | `.git/index` — **relative** |
-    | linked worktree | `<repo>/.git/worktrees/<name>` | same, **absolute** |
+    | linked worktree | `<repo>/.git/worktrees/<name>` | `<repo>/.git/worktrees/<name>/index` |
+
+    The worktree row is a *different index file*, not the plain row's made
+    absolute — worth spelling out in a table whose whole value is precision.
 
     So the live trigger is the **worktree** commit, and `agent.md` mandates
     ephemeral worktrees for metaframework shift work while the fleet uses them
@@ -125,35 +128,51 @@ def git_env() -> dict[str, str]:
     variables git exports are **not interchangeable** — which is why the whole
     `GIT_*` namespace goes rather than the one variable sandy#173 names:
 
-    | inherited | `rev-parse --show-toplevel` | `ls-files -z` |
+    Each call is listed at the cwd it actually runs with — `rev-parse` at
+    `tests/` (`repo_root`), `ls-files` at the repo root (`tracked_files`).
+    That distinction matters: `ls-files` filters to its cwd prefix, so the same
+    redirect reads as "foreign" from the root and as "empty" from `tests/`.
+
+    | inherited | `rev-parse` @ `tests/` | `ls-files -z` @ root |
     |---|---|---|
     | *(nothing)* | the repo root | this repo's files |
     | `GIT_DIR` | **cwd** — `tests/`, not the decoy | **the decoy's files** |
-    | `GIT_INDEX_FILE` | the repo root — *correct* | **empty** |
+    | `GIT_INDEX_FILE` | the repo root — *correct* | **the decoy's files** |
 
     Two corrections to the ticket fall out of that table. First, sandy#173
     describes both calls as answering "about the repository `GIT_DIR` names";
     that is true of `ls-files` and not of `rev-parse`, which degrades to cwd
     because with no `GIT_WORK_TREE` alongside it git takes the current
     directory as the work tree. Second, and worse: `GIT_INDEX_FILE` **on its
-    own** — with no `GIT_DIR` at all — empties the file list while leaving the
-    root correct. Nothing about that state looks wrong from the inside, and
-    scrubbing only `GIT_DIR` would leave it live.
+    own** — with no `GIT_DIR` at all — swaps the index out while leaving the
+    root correct, so the sweep enumerates another repository's paths and
+    nothing about the state looks wrong from the inside. Scrubbing only
+    `GIT_DIR`, as the ticket prescribes, would leave that live.
 
-    Every route ends in the same false green. With a foreign file list,
-    `find_showboat_artifacts` joins the decoy's *relative paths* onto the wrong
-    root, every one misses, `OSError` is swallowed by design
+    Every route ends in the same false green: `find_showboat_artifacts` joins
+    the decoy's *relative paths* onto this repo's root, every one misses,
+    `OSError` is swallowed by design
     (`test_unreadable_paths_are_skipped_not_fatal`), and the sweep reports no
-    offenders having read none of this repo's files. With an *empty* one it
-    reports no offenders having read nothing at all. An empty result and a
+    offenders having read none of this repo's files. An empty result and a
     clean tree are the same output.
 
     Scrubbed **here**, in the helper that runs git, rather than only in
     `conftest.py`: a conftest scrub is undone by any test that sets `GIT_DIR`
     itself, which is exactly what the guards below do. See the caveat in
     `tests/conftest.py` — this is the half that makes the function correct
-    rather than merely the suite quiet. Every command here reads local history
-    only, so dropping the whole `GIT_*` namespace costs nothing.
+    rather than merely the suite quiet.
+
+    **Scope limit, because `conftest.py` points at this function as the shape
+    to copy: local-only commands.** Every git call in this module touches
+    local history (and `_make_decoy_repo` writes to a throwaway repo), so
+    dropping the whole namespace costs nothing here. It is *not* safe around a
+    `fetch`, `push`, or `clone`: a Dispatch session carries authentication in
+    exactly these variables — `GIT_CONFIG_COUNT` with `GIT_CONFIG_KEY_*`
+    holding a `url.https://x-access-token:<token>@github.com/.insteadOf`
+    rewrite, and `GIT_SSH_COMMAND` naming the bot key. Scrub the namespace
+    around a remote command and you have removed the credentials. A caller
+    that needs a remote must preserve `GIT_CONFIG_*` and `GIT_SSH_COMMAND`
+    while still dropping `GIT_DIR` / `GIT_INDEX_FILE` / `GIT_WORK_TREE`.
     """
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
@@ -752,22 +771,26 @@ def _make_decoy_repo(path: Path) -> None:
     The bug this module guards against is read-only; the fixture proving it
     need not be.
     """
+    # Also detached from the developer's global/system config: a machine with
+    # `commit.gpgsign=true` or a `core.hooksPath` would otherwise fail to build
+    # the decoy, or run that hook, for reasons having nothing to do with the
+    # test. Identity is passed with `-c` rather than two `git config` calls
+    # because /dev/null config has nowhere to write it back to.
+    env = git_env() | {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+    identity = ("-c", "user.email=decoy@example.com", "-c", "user.name=decoy")
+
+    def run(*args: str) -> None:
+        done = subprocess.run(
+            ["git", *identity, *args], cwd=path, capture_output=True, text=True, env=env
+        )
+        if done.returncode != 0:
+            raise RuntimeError(f"decoy setup failed: git {' '.join(args)}: {done.stderr.strip()}")
+
     path.mkdir(parents=True, exist_ok=True)
-    for args in (
-        ("init", "--initial-branch=main"),
-        ("config", "user.email", "decoy@example.com"),
-        ("config", "user.name", "decoy"),
-    ):
-        subprocess.run(["git", *args], cwd=path, check=True, capture_output=True, env=git_env())
+    run("init", "--initial-branch=main")
     (path / "decoy-only-file.md").write_text("# not this repo\n")
-    subprocess.run(["git", "add", "-A"], cwd=path, check=True, capture_output=True, env=git_env())
-    subprocess.run(
-        ["git", "commit", "-m", "decoy: the wrong repo"],
-        cwd=path,
-        check=True,
-        capture_output=True,
-        env=git_env(),
-    )
+    run("add", "-A")
+    run("commit", "-m", "decoy: the wrong repo")
 
 
 def _point_git_at(decoy: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -800,11 +823,10 @@ def test_git_dir_in_the_environment_cannot_redirect_the_root(tmp_path, monkeypat
 
     root = repo_root()
 
-    assert (root / "sandy").is_dir() and (root / "pyproject.toml").is_file(), (
+    assert root == Path(__file__).resolve().parent.parent, (
         f"repo_root() resolved to {root}, which is not this repo — an inherited "
         "GIT_DIR redirected it. tests/test_repo_hygiene.py:git_env must scrub GIT_*."
     )
-    assert root == Path(__file__).resolve().parent.parent
 
 
 def test_git_dir_in_the_environment_cannot_redirect_the_file_list(tmp_path, monkeypatch):
@@ -830,62 +852,68 @@ def test_git_dir_in_the_environment_cannot_redirect_the_file_list(tmp_path, monk
     )
 
 
-def test_git_index_file_alone_cannot_empty_the_file_list(tmp_path, monkeypatch):
-    """The row `GIT_DIR`-only scrubbing would leave live.
+def test_git_index_file_alone_cannot_swap_the_index(tmp_path, monkeypatch):
+    """The row `GIT_DIR`-only scrubbing — the ticket's prescription — leaves live.
 
-    Git exports `GIT_INDEX_FILE` beside `GIT_DIR`, and on its own it redirects
-    `ls-files` to a foreign index while `rev-parse --show-toplevel` keeps
-    returning the correct root. Measured: the file list comes back **empty**.
+    Git exports `GIT_INDEX_FILE` beside `GIT_DIR`, and on its own it swaps the
+    index `ls-files` reads while `rev-parse --show-toplevel` keeps returning the
+    correct root. That is the most dangerous shape this module has, because it
+    is the one that looks healthiest: the root is right, so nothing upstream
+    looks wrong, and the sweep's green is indistinguishable from a clean tree.
 
-    That is the most dangerous shape this module has, because it is the one
-    that looks healthiest — the root is right, no path is obviously foreign,
-    and the sweep's green is indistinguishable from a genuinely clean tree.
-    Pinned separately from the `GIT_DIR` guards so that narrowing the scrub to
-    `GIT_DIR` fails here rather than silently.
+    Asserted as "this repo's files are present", not "the list is non-empty".
+    Emptiness is a `cwd` artifact — `ls-files` filters to its cwd prefix, so the
+    same redirect reads empty from `tests/` and *foreign* from the repo root,
+    which is where `tracked_files` actually runs. The non-empty form would
+    therefore pass against a fully redirected sweep.
     """
     _make_decoy_repo(tmp_path / "decoy")
     monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "decoy" / ".git" / "index"))
 
-    root = repo_root()
-    tracked = tracked_files(root)
+    tracked = tracked_files(repo_root())
 
-    assert tracked, (
-        "tracked_files() returned an empty list — an inherited GIT_INDEX_FILE "
-        "redirected `git ls-files` to a foreign index. The sweep would report a "
-        "clean tree having scanned nothing."
+    assert "tests/test_repo_hygiene.py" in tracked, (
+        "tracked_files() did not return this repo's own files — an inherited "
+        "GIT_INDEX_FILE swapped the index out from under `git ls-files`. The "
+        "sweep would report a clean tree having scanned another repository."
     )
-    assert "tests/test_repo_hygiene.py" in tracked
+    assert "decoy-only-file.md" not in tracked
 
 
-def test_the_guard_still_reads_this_repo_under_a_redirect(tmp_path, monkeypatch):
-    """End-to-end, and non-vacuously: the sweep must *find* the planted artifact.
+def test_every_swept_path_exists_in_the_repo_being_swept(tmp_path, monkeypatch):
+    """End-to-end, and the property a redirect actually breaks.
 
-    `offenders == []` is the guard's green, and it is also what a guard reading
-    an empty file list returns — the two are indistinguishable from the outside.
-    So this plants a marker in a tracked file's place and asserts it is
-    reported: a redirected sweep cannot see it, and a working one must.
+    `offenders == []` cannot carry this test: every path the sweep would flag is
+    either absent or in ALLOWED, so the assertion is a tautology satisfied by a
+    sweep that read nothing at all — the exact "an empty result and a clean tree
+    are the same output" trap this module is built around. An earlier revision
+    of this test asserted precisely that and provided no coverage.
+
+    What a redirect *does* break is the pairing of the two calls: one repo's
+    file names get joined onto another repo's root, so the paths handed to the
+    scanner do not exist. `find_showboat_artifacts` swallows that as `OSError`
+    by design (`test_unreadable_paths_are_skipped_not_fatal`) and returns a
+    clean verdict. Asserting every tracked path resolves on disk is what makes
+    the silence mean something.
     """
     _make_decoy_repo(tmp_path / "decoy")
     _point_git_at(tmp_path / "decoy", monkeypatch)
 
     root = repo_root()
     tracked = tracked_files(root)
-    planted = "tests/test_repo_hygiene.py"
-    assert planted in tracked, "fixture assumes this module is tracked"
+    assert tracked, "fixture assumes this repo tracks files"
 
-    offenders = find_showboat_artifacts(root, [p for p in tracked if p == planted])
+    missing = [rel for rel in tracked if not (root / rel).exists()]
 
-    # This module is in ALLOWED, so a *working* sweep reports nothing for it —
-    # assert on the file list reaching the scan instead, which is the step a
-    # redirect actually breaks.
-    assert offenders == []
-    assert (root / planted).is_file(), (
-        "the path handed to the scan does not exist on disk — the sweep was "
-        "reading one repo's file names against another repo's tree."
+    assert missing == [], (
+        f"{len(missing)} of {len(tracked)} swept paths do not exist under {root} "
+        f"(e.g. {missing[:3]}) — the sweep was reading one repository's file "
+        "names against another repository's tree, and every miss is swallowed "
+        "as OSError, so it would have reported a clean tree."
     )
 
 
-def test_the_conftest_scrub_is_registered_and_actually_scrubs(monkeypatch):
+def test_the_conftest_scrub_is_registered_and_actually_scrubs(request, monkeypatch):
     """The safety net needs its own negative control, or it is decorative.
 
     Nothing else in this suite can fail if `_scrub_git_env` is deleted: the
@@ -895,35 +923,58 @@ def test_the_conftest_scrub_is_registered_and_actually_scrubs(monkeypatch):
 
     Asserting "no `GIT_*` in `os.environ` during a test" would be the obvious
     check and is worthless — on a developer machine nothing exports `GIT_DIR`
-    in the first place, so it passes against a deleted fixture. The two things
-    that can actually break are pinned instead: that it is still **autouse**
-    (registration), and that it removes the variables when there are some to
-    remove (behaviour).
+    in the first place, so it passes against a deleted fixture. Three things can
+    actually break, and each needs its own assertion:
+
+    1. **registration** — is it still autouse?
+    2. **behaviour** — does the scrub remove the variables?
+    3. **wiring** — does the fixture actually *call* the scrub?
+
+    (3) is not redundant, and leaving it out was a live gap rather than a
+    hypothetical one. Splitting the loop into a plain `scrub_git_env` made (2)
+    testable without pytest internals, and in doing so it created a fixture body
+    that could be emptied while both other assertions stayed green: a mutation
+    replacing the body with `return None` passed all 42 tests in this module.
+    A test seam cut to avoid a private attribute became a way for the guard to
+    stop guarding.
     """
     from tests import conftest
 
-    # pytest 8.4 wraps a fixture in `FixtureFunctionDefinition`; the decorator's
-    # arguments live on `_fixture_function_marker` and the undecorated callable
-    # on `_fixture_function`. Both are private, so this assertion is pinned to a
-    # pytest internal on purpose — the alternative (asserting on os.environ) is
-    # the vacuous check described above. If a pytest bump breaks these two
-    # attributes, that is a loud failure telling you to re-point them, which is
-    # the correct outcome for a guard whose subject is a fixture's registration.
-    marker = conftest._scrub_git_env._fixture_function_marker
-    assert marker.autouse is True, (
-        "_scrub_git_env is no longer autouse — it now protects nothing, and "
-        "every test that shells out to git is redirectable again."
+    # `request.fixturenames` is public API and lists every fixture active for
+    # this test, autouse included. It discriminates exactly: `_scrub_git_env`
+    # appears only while it is autouse, and disappears if deleted outright.
+    assert "_scrub_git_env" in request.fixturenames, (
+        "_scrub_git_env is not active for this test — it has been deleted or is "
+        "no longer autouse, so it now protects nothing and every test that "
+        "shells out to git is redirectable again."
     )
 
     monkeypatch.setenv("GIT_DIR", "/nonexistent/decoy/.git")
     monkeypatch.setenv("GIT_INDEX_FILE", "/nonexistent/decoy/.git/index")
+
+    # Behaviour, via the plain function — no pytest internals.
     inner = pytest.MonkeyPatch()
     try:
-        conftest._scrub_git_env._fixture_function(inner)
+        conftest.scrub_git_env(inner)
         assert "GIT_DIR" not in os.environ
         assert "GIT_INDEX_FILE" not in os.environ
     finally:
         inner.undo()
+
+    # Wiring. Invoking a fixture's body outside a pytest run requires reaching
+    # for `_fixture_function` (pytest >=8.4 wraps fixtures in
+    # `FixtureFunctionDefinition`); there is no public equivalent. That is a
+    # deliberate version dependency: a pytest bump breaking this attribute is a
+    # loud failure telling you to re-point it, which is strictly better than the
+    # silent hole its absence leaves. Kept narrow — the two assertions above use
+    # public API, and only this one is pinned to an internal.
+    assert "GIT_DIR" in os.environ, "monkeypatch setup above did not take"
+    conftest._scrub_git_env._fixture_function(pytest.MonkeyPatch())
+    assert "GIT_DIR" not in os.environ, (
+        "the _scrub_git_env fixture body ran without scrubbing anything — it is "
+        "registered and autouse but no longer calls scrub_git_env, so every test "
+        "in the suite is unprotected while this module still reports green."
+    )
 
 
 def test_no_showboat_artifact_is_tracked():
