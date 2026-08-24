@@ -17,6 +17,11 @@
 [sandy]
 owner = "your-canonical-name"       # CLI always resolves to this actor
 timezone = "America/New_York"
+# Sandy remarks on the hour when the hour is worth remarking on -- "Wow, you're
+# up late, Tom. Get some sleep soon." in the small hours, nothing at 2pm. The
+# window is read in the timezone above (or the requesting user's). Set to "no"
+# to switch every flourish off and get plain answers only.
+flourishes = "yes"
 
 
 # ---- Actor Identities ----

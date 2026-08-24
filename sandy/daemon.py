@@ -7,6 +7,7 @@ import signal
 import sys
 from pathlib import Path
 
+from sandy import voice
 from sandy.config import apply_env, find_config_path, load_config
 from sandy.loader import load_plugins
 from sandy import oauth_server
@@ -113,10 +114,13 @@ class Daemon:
             logger.warning("Pipeline errors: %s", errors)
         return results, errors
 
-    async def _handle_callback(self, text, actor, reply_fn, tz: str | None = None):
-        """Process an incoming message through the pipeline and send replies."""
-        logger.debug("Callback invoked: text='%s', actor='%s', tz='%s'", text, actor, tz)
+    async def _run_with_progress(self, text, actor, reply_fn, tz: str | None = None):
+        """Run the pipeline, streaming progress messages back as they arrive.
 
+        The drain task is what turns a plugin's synchronous ``progress()`` calls
+        into transport replies; it is closed in a ``finally`` so a raising
+        pipeline still stops the queue rather than leaking the task.
+        """
         loop = asyncio.get_running_loop()
         progress_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -132,27 +136,54 @@ class Daemon:
 
         drain_task = asyncio.create_task(drain_progress())
         try:
-            results, errors = await self.handle_message(
-                text, actor, progress_factory=make_progress, tz=tz
-            )
+            return await self.handle_message(text, actor, progress_factory=make_progress, tz=tz)
         finally:
             await progress_queue.put(None)
             await drain_task
+
+    @staticmethod
+    def _error_reply(plugin_name: str, error_msg: str) -> dict:
+        """Turn a plugin exception into something Sandy would actually say."""
+        friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
+        if error_msg:
+            friendly = f"{friendly} `{error_msg[:100]}`"
+        return {"text": friendly}
+
+    async def _deliver(self, text, actor, reply_fn, results, errors, tz: str | None = None):
+        """Send every reply for one interaction, opening with Sandy's aside.
+
+        The aside is resolved once and attached to the first thing Sandy says —
+        not to progress lines, and never once per fanned-out response. See
+        ``sandy/voice.py`` for why it cannot live inside a plugin.
+        """
+        aside = voice.opening_aside(actor, tz=tz, config=self.config)
+        spoken = False
+
+        async def say(plugin_name: str, response: dict) -> None:
+            nonlocal spoken
+            if not spoken:
+                response = voice.prepend_aside(response, aside)
+                spoken = True
+            await reply_fn(plugin_name, response)
 
         for plugin_name, response in results:
             logger.debug("Dispatching reply for '%s' back to transport", plugin_name)
             if "pdf_url" in response:
                 response = await self._handle_pdf_response(response)
-            await reply_fn(plugin_name, response)
+            await say(plugin_name, response)
+
         for plugin_name, error_msg in errors:
             logger.debug("Dispatching error reply for '%s': %s", plugin_name, error_msg)
-            friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
-            if error_msg:
-                detail = error_msg[:100]
-                friendly = f"{friendly} `{detail}`"
-            await reply_fn("error", {"text": friendly})
+            await say("error", self._error_reply(plugin_name, error_msg))
+
         if not results and not errors:
-            await reply_fn("sandy", {"text": "Sorry, I'm not sure how to do that."})
+            await say("sandy", {"text": voice.did_not_understand(text)})
+
+    async def _handle_callback(self, text, actor, reply_fn, tz: str | None = None):
+        """Process an incoming message through the pipeline and send replies."""
+        logger.debug("Callback invoked: text='%s', actor='%s', tz='%s'", text, actor, tz)
+        results, errors = await self._run_with_progress(text, actor, reply_fn, tz=tz)
+        await self._deliver(text, actor, reply_fn, results, errors, tz=tz)
 
     async def _handle_pdf_response(self, response: dict) -> dict:
         """Attempt to print a PDF and update the response text to reflect the outcome.

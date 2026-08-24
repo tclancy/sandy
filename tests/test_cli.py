@@ -171,10 +171,14 @@ def test_main_no_match(tmp_path, capsys):
         """
         },
     )
-    with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
+    with (
+        patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir),
+        patch("sandy.cli.voice.opening_aside", return_value=None),
+    ):
         exit_code = main(["unknown command"])
     captured = capsys.readouterr()
-    assert "I don't know how to do that yet." in captured.out
+    assert "unknown command" in captured.out
+    assert "help" in captured.out
     assert exit_code == 1
 
 
@@ -326,3 +330,147 @@ def test_main_timezone_default_is_none(tmp_path, capsys, monkeypatch):
     captured = capsys.readouterr()
     assert "tz=None" in captured.out
     assert exit_code == 0
+
+
+# --- voice: one aside per interaction, at the delivery boundary (sandy#183) ---
+
+
+def test_main_opens_with_the_aside_above_the_first_answer(tmp_path, capsys):
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "echo.py": """
+            name = "echo"
+            commands = ["echo"]
+            def handle(text, actor):
+                return {"text": "ok"}
+        """
+        },
+    )
+    with (
+        patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir),
+        patch("sandy.cli.voice.opening_aside", return_value="Wow, you're up late, Tom."),
+    ):
+        exit_code = main(["echo this"])
+    out = capsys.readouterr().out
+    assert out.index("Wow, you're up late, Tom.") < out.index("ok")
+    assert exit_code == 0
+
+
+def test_main_says_the_aside_once_even_when_several_plugins_answer(tmp_path, capsys):
+    """Sandy fans out — an aside per response would repeat it once per match."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "alpha.py": """
+            name = "alpha"
+            commands = ["test"]
+            def handle(text, actor):
+                return {"text": "alpha answer"}
+        """,
+            "beta.py": """
+            name = "beta"
+            commands = ["test"]
+            def handle(text, actor):
+                return {"text": "beta answer"}
+        """,
+        },
+    )
+    with (
+        patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir),
+        patch("sandy.cli.voice.opening_aside", return_value="You're up early, Tom."),
+    ):
+        main(["test"])
+    out = capsys.readouterr().out
+    assert out.count("You're up early, Tom.") == 1
+    assert "alpha answer" in out
+    assert "beta answer" in out
+
+
+def test_main_stays_quiet_when_the_hour_is_unremarkable(tmp_path, capsys):
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "echo.py": """
+            name = "echo"
+            commands = ["echo"]
+            def handle(text, actor):
+                return {"text": "ok"}
+        """
+        },
+    )
+    with (
+        patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir),
+        patch("sandy.cli.voice.opening_aside", return_value=None),
+    ):
+        main(["echo this"])
+    out = capsys.readouterr().out
+    assert out.strip().splitlines()[0] == "[echo]"
+
+
+def test_main_carries_the_aside_on_the_unmatched_reply_too(tmp_path, capsys):
+    """Nothing matched is still an interaction — 3am is 3am either way."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "echo.py": """
+            name = "echo"
+            commands = ["echo"]
+            def handle(text, actor):
+                return {"text": "ok"}
+        """
+        },
+    )
+    with (
+        patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir),
+        patch("sandy.cli.voice.opening_aside", return_value="Wow, you're up late, Tom."),
+    ):
+        exit_code = main(["wibble the frobnitz"])
+    out = capsys.readouterr().out
+    assert "Wow, you're up late, Tom." in out
+    assert "wibble the frobnitz" in out
+    assert exit_code == 1
+
+
+def test_main_passes_the_requested_timezone_to_the_voice(tmp_path):
+    """3am is only remarkable where the user is."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "echo.py": """
+            name = "echo"
+            commands = ["echo"]
+            def handle(text, actor):
+                return {"text": "ok"}
+        """
+        },
+    )
+    with (
+        patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir),
+        patch("sandy.cli.voice.opening_aside", return_value=None) as spy,
+    ):
+        main(["--actor", "michelle", "--timezone", "Europe/London", "echo this"])
+    assert spy.call_args.args[0] == "michelle"
+    assert spy.call_args.kwargs["tz"] == "Europe/London"
+
+
+def test_main_opens_with_the_aside_above_the_plugin_s_own_title(tmp_path, capsys):
+    """A greeting under the header reads like a footnote (sandy#183)."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        {
+            "titled.py": """
+            name = "titled"
+            commands = ["titled"]
+            def handle(text, actor):
+                return {"title": "Sandy Help", "text": "the body"}
+        """
+        },
+    )
+    with (
+        patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir),
+        patch("sandy.cli.voice.opening_aside", return_value="Wow, you're up late, Tom."),
+    ):
+        main(["titled"])
+    out = capsys.readouterr().out
+    assert out.index("Wow, you're up late, Tom.") < out.index("Sandy Help")

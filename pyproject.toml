@@ -17,6 +17,9 @@ dependencies = [
 testpaths = ["tests"]
 addopts = "--cov=sandy --cov-report=term-missing --cov-fail-under=80"
 asyncio_mode = "auto"
+markers = [
+    "real_voice: opt out of the autouse voice silencer in tests/conftest.py",
+]
 
 [tool.coverage.run]
 source = ["sandy"]

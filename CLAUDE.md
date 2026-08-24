@@ -3,10 +3,88 @@
 ## What Is Sandy
 
 Sandy is a CLI tool and Slack bot that routes freeform text commands to plugins.
-Inspired by [I Want Sandy](https://boingboing.net/2007/11/14/i-want-sandy-perfect.html).
-The goal is to "bring delight" — surfacing things you care about with minimal friction.
+Named for [I Want Sandy](https://boingboing.net/2007/11/14/i-want-sandy-perfect.html)
+(2007). The goal is to "bring delight" — surfacing things you care about with
+minimal friction. **Read the Inspiration section below before writing any
+user-facing string.**
 
 Fan-out model: **all** matching plugins respond to a command, not just the first match.
+
+## Inspiration — why Sandy is called Sandy
+
+The name comes from **I Want Sandy**, a 2007 virtual assistant you used by
+sending it email in plain English: *"Sandy, remind me to pick up the dry
+cleaning at 6:50pm tonight."* It shut down in 2008 and people still miss it.
+Eugene Wei's [write-up of why](https://www.eugenewei.com/blog/2014/1/7/i-want-sandy)
+is the design brief for this project — read it once; it is short.
+
+Three things from that post are load-bearing here, in descending order of how
+often they get forgotten:
+
+**1. Tiny flourishes go a long way.** Wei's example is the whole thesis:
+
+> One time I recall sending IWantSandy an email at 3 in the morning asking
+> "her" to remind me of something the next morning. Her reply began with
+> "Wow! You're up late! Get some sleep soon" or something like that. Simple to
+> code, powerfully effective.
+
+That is one `if` statement on an hour. It is also the single most memorable
+thing anyone wrote about the product, seven years after it died. When you are
+choosing between a correct string and a human one, the human one is the
+product.
+
+**2. The most efficient way to do something is not always the most human.**
+Email was a *worse* interface than a form — you had to wait for a reply, and
+you had to re-send when Sandy misunderstood. It was better anyway, because
+"interacting with it in a manner typically reserved for interacting with other
+humans created a powerful illusion of intimacy". This is why Sandy takes
+freeform text and substring-matches it rather than exposing subcommands and
+flags, and why a misunderstanding should ask for clarification rather than
+print a usage block.
+
+**3. Let people turn it off.** Wei, in the same post: "I know some folks would
+hate that type of false anthropomorphism, but perhaps you could choose whether
+to turn it on or off." Every flourish ships with a switch — see
+`[sandy] flourishes` in `sandy.toml.example`.
+
+### What this means when you write a string
+
+| Instead of | Say |
+|------------|-----|
+| `Unknown command: 'wibble'` | `I'm not sure what to do with "wibble". Ask me for help and I'll show you what I know.` |
+| `ERROR: plugin raised RuntimeError` | `I am terribly sorry, cryptics just does not want to behave!` |
+| `Playlist updated (23 tracks)` | `Saved 23 tracks to 'Discovery'.` — say what *you did*, not what changed |
+| Silence on interrupt | `Wrapping up early today!` (`cli.py` already does this — copy that register) |
+
+Sandy talks like a capable assistant who is slightly amused by the job. Warm,
+brief, first person, never cute for its own sake, and never emoji-as-tone.
+
+### The one hard rule: asides live at the boundary, not in plugins
+
+Sandy fans out — **all** matching plugins answer a single command. So anything
+that belongs to the *interaction* rather than the *answer* must be emitted once,
+at the delivery boundary (`cli.main`, `daemon._handle_callback`), never from
+inside a plugin's `handle()`. A friendly greeting written into a plugin repeats
+itself once per match the first time two plugins match the same phrase.
+
+`sandy/voice.py` owns this. It exposes:
+
+- `opening_aside(actor, tz=, config=)` — the once-per-interaction aside, or
+  `None` when the hour is unremarkable. **The silence is the feature**: a
+  greeting on every command is a template, and a template reads as software.
+  Sandy speaks up in the small hours (23:00–04:59) and early (05:00–06:59) and
+  says nothing the rest of the day.
+- `prepend_aside(response, aside)` — attaches it to the first thing Sandy says.
+- `did_not_understand(text)` — the shared "ask me to clarify" reply, so CLI and
+  Slack cannot drift apart on the same condition (they had, before #183).
+
+Plugins must not import `sandy.voice`.
+
+**Testing note:** `opening_aside` reads the wall clock, so `tests/conftest.py`
+carries an autouse fixture that silences it. A test that needs the real thing
+carries `@pytest.mark.real_voice`; a boundary test that wants a fixed aside
+patches `voice.opening_aside` directly. Without that fixture, any test pinning
+an exact reply string passes at 2 p.m. and fails at 3 a.m.
 
 ### Orchestration Role
 
@@ -63,6 +141,8 @@ CLI mode is stateless. Daemon mode (`sandy serve`) is long-running and transport
 - **transport_loader.py** — transport discovery from `sandy/transports/`
 - **printer.py** — PDF download + printing (CUPS and IPP URI support)
 - **progress.py** — real-time status reporting (CLI stderr / daemon async queue)
+- **voice.py** — once-per-interaction flourishes and the shared didn't-understand
+  reply; called only from the delivery boundary, never from a plugin (see Inspiration)
 
 ## Plugin Contract
 
