@@ -120,6 +120,19 @@ class Daemon:
         The drain task is what turns a plugin's synchronous ``progress()`` calls
         into transport replies; it is closed in a ``finally`` so a raising
         pipeline still stops the queue rather than leaking the task.
+
+        The ``sleep(0)`` before the sentinel is load-bearing. ``progress()`` runs
+        on the executor thread and schedules its ``put_nowait`` with
+        ``call_soon_threadsafe``; the pipeline's own completion is scheduled the
+        same way. Resuming here does **not** prove the progress callback has run,
+        so putting the sentinel immediately can overtake a message the plugin
+        already emitted — the drain then sees ``None`` first and exits, and the
+        message is delivered to nobody. Yielding once lets the whole pending
+        callback batch run first, and the queue is FIFO from there on.
+
+        Observed as a CI failure on Linux/CPython 3.13.15 while this suite passes
+        on macOS/3.13.7 (sandy#183); it is a pre-existing daemon bug that no test
+        covered before, not a regression from the voice work.
         """
         loop = asyncio.get_running_loop()
         progress_queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -138,6 +151,7 @@ class Daemon:
         try:
             return await self.handle_message(text, actor, progress_factory=make_progress, tz=tz)
         finally:
+            await asyncio.sleep(0)  # let pending progress callbacks land first
             await progress_queue.put(None)
             await drain_task
 
