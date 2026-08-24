@@ -230,3 +230,43 @@ def test_inbound_lag_seconds_negative_clamped_to_zero():
     """Clock skew (event ts ahead of now) clamps to 0, never negative."""
     event = {"ts": "1000.000000"}
     assert inbound_lag_seconds(event, now=999.0) == 0.0
+
+
+# --- voice: the once-per-interaction aside (sandy#183) ---
+
+
+def test_format_response_renders_the_aside_above_the_header():
+    """A greeting under the header reads like a footnote, not a greeting."""
+    result = format_response(
+        "help", {"aside": "Wow, you're up late, Tom.", "title": "Sandy Help", "text": "the body"}
+    )
+    blocks = result["blocks"]
+    assert blocks[0]["type"] == "section"
+    assert blocks[0]["text"]["text"] == "Wow, you're up late, Tom."
+    assert blocks[1]["type"] == "header"
+
+
+def test_format_response_without_an_aside_is_unchanged():
+    assert format_response("echo", {"text": "hello"}) == format_response(
+        "echo", {"aside": None, "text": "hello"}
+    )
+
+
+def test_the_aside_does_not_defeat_code_fence_promotion():
+    """``_FENCED_RE`` is anchored at the start of ``text`` — splicing the aside
+    in there silently dropped responses back to the #122 failure modes."""
+    fenced = "```\nline one\nline two\n```"
+    blocks = format_response("itguy", {"aside": "You're up early, Tom.", "text": fenced})["blocks"]
+
+    assert any(b["type"] == "rich_text" for b in blocks)
+
+
+def test_the_aside_does_not_spend_the_text_budget():
+    """The 3000-char section cap belongs to the plugin's answer, not a pleasantry."""
+    long_text = "x" * 3500
+    blocks = format_response("echo", {"aside": "You're up early, Tom.", "text": long_text})[
+        "blocks"
+    ]
+    body = [b for b in blocks if b["type"] == "section" and b["text"]["text"].startswith("x")]
+
+    assert len(body[0]["text"]["text"]) == 3000

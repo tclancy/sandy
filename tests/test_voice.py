@@ -7,6 +7,8 @@ from turning into noise is the *silence* — Sandy remarks only on hours a perso
 would remark on, and says nothing at 2 p.m.
 """
 
+import os
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -75,38 +77,41 @@ class TestTimeOfDayAside:
         assert voice.time_of_day_aside(_at(7, 0), "tom", choice=_first) is None
 
 
-class TestPrependAside:
-    def test_puts_the_aside_above_the_answer(self):
-        result = voice.prepend_aside({"text": "42 tracks added."}, "You're up late.")
+class TestAttachAside:
+    def test_carries_the_aside_in_its_own_field(self):
+        """Not spliced into ``text`` — that broke three things in Slack at once:
+        code-fence promotion, block ordering, and the 3000-char budget."""
+        result = voice.attach_aside({"text": "42 tracks added."}, "You're up late.")
 
-        assert result["text"] == "You're up late.\n\n42 tracks added."
+        assert result["aside"] == "You're up late."
+        assert result["text"] == "42 tracks added."
+
+    def test_the_aside_leads_so_renderers_that_iterate_keys_put_it_first(self):
+        result = voice.attach_aside({"title": "Music", "text": "Done."}, "You're up late.")
+
+        assert next(iter(result)) == "aside"
 
     def test_a_missing_aside_returns_the_response_untouched(self):
         response = {"text": "42 tracks added."}
 
-        assert voice.prepend_aside(response, None) == response
+        assert voice.attach_aside(response, None) == response
+        assert "aside" not in voice.attach_aside(response, None)
 
     def test_does_not_mutate_the_caller_s_response(self):
         response = {"text": "42 tracks added."}
 
-        voice.prepend_aside(response, "You're up late.")
+        voice.attach_aside(response, "You're up late.")
 
         assert response == {"text": "42 tracks added."}
 
     def test_preserves_the_other_fields(self):
-        result = voice.prepend_aside(
+        result = voice.attach_aside(
             {"title": "Music", "text": "Done.", "links": [{"label": "x", "url": "y"}]},
             "You're up late.",
         )
 
         assert result["title"] == "Music"
         assert result["links"] == [{"label": "x", "url": "y"}]
-
-    def test_supplies_the_text_field_when_the_response_has_none(self):
-        result = voice.prepend_aside({"audio_url": "http://x/a.mp3"}, "You're up late.")
-
-        assert result["text"] == "You're up late."
-        assert result["audio_url"] == "http://x/a.mp3"
 
 
 class TestDidNotUnderstand:
@@ -123,6 +128,15 @@ class TestDidNotUnderstand:
 
     def test_copes_with_an_empty_command(self):
         assert voice.did_not_understand("").strip() != ""
+
+    def test_defuses_slack_mentions_in_the_echo(self):
+        """Slack delivers ``@channel`` as ``<!channel>``. Echoing it verbatim
+        would make Sandy ping the channel to say she didn't understand."""
+        reply = voice.did_not_understand("<!channel> <@U123> do the thing")
+
+        assert "<!channel>" not in reply
+        assert "<@U123>" not in reply
+        assert "do the thing" in reply
 
 
 class TestOpeningAside:
@@ -146,6 +160,34 @@ class TestOpeningAside:
         now = datetime(2026, 8, 24, 3, 0, tzinfo=ZoneInfo("UTC"))
 
         assert voice.opening_aside("tom", tz="Mars/Olympus", now=now, choice=_first) is not None
+
+    def test_the_default_clock_is_the_machine_s_own_when_no_zone_is_given(self):
+        """With no tz anywhere, Sandy must read the local clock.
+
+        Defaulting to UTC silently shifts the whole window: on US Eastern it
+        would greet you at 8pm and stay silent at 3am — the one case the
+        feature exists for. Masked during manual testing because the repo's
+        own ``sandy.toml`` sets a timezone (sandy#183 review).
+        """
+        original = os.environ.get("TZ")
+        os.environ["TZ"] = "Pacific/Auckland"
+        time.tzset()
+        try:
+            resolved = voice._resolve_now(None, None)
+            assert resolved.tzinfo is not None
+            assert resolved.utcoffset() == datetime.now(ZoneInfo("Pacific/Auckland")).utcoffset()
+        finally:
+            if original is None:
+                del os.environ["TZ"]
+            else:
+                os.environ["TZ"] = original
+            time.tzset()
+
+    def test_a_non_string_timezone_does_not_raise(self):
+        """Slack hands us whatever is in the user profile's ``tz`` field."""
+        now = datetime(2026, 8, 24, 3, 0, tzinfo=ZoneInfo("UTC"))
+
+        assert voice.opening_aside("tom", tz=5, now=now, choice=_first) is not None
 
     def test_the_default_clock_lands_in_the_requested_zone(self):
         """A naive ``datetime.now()`` silently ignores tz — 3am ET greeted a

@@ -216,12 +216,11 @@ def test_callback_opens_with_the_aside_on_the_first_reply_only(tmp_path):
         with patch("sandy.daemon.voice.opening_aside", return_value="You're up early, Tom."):
             await daemon._handle_callback("test", "tom", reply_fn)
 
-        texts = [resp["text"] for _, resp in replies]
-        assert len(texts) == 2
-        assert sum("You're up early, Tom." in t for t in texts) == 1
-        assert texts[0].startswith("You're up early, Tom.")
-        assert "alpha answer" in texts[0]
-        assert "beta answer" in texts[1]
+        assert len(replies) == 2
+        assert replies[0][1]["aside"] == "You're up early, Tom."
+        assert "aside" not in replies[1][1]
+        assert replies[0][1]["text"] == "alpha answer"
+        assert replies[1][1]["text"] == "beta answer"
 
     asyncio.run(run())
 
@@ -279,7 +278,7 @@ def test_callback_carries_the_aside_on_the_unmatched_reply(tmp_path):
         with patch("sandy.daemon.voice.opening_aside", return_value="Wow, you're up late, Tom."):
             await daemon._handle_callback("wibble", "tom", reply_fn)
 
-        assert replies[0][1]["text"].startswith("Wow, you're up late, Tom.")
+        assert replies[0][1]["aside"] == "Wow, you're up late, Tom."
         assert "wibble" in replies[0][1]["text"]
 
     asyncio.run(run())
@@ -313,8 +312,8 @@ def test_callback_does_not_put_the_aside_on_a_progress_update(tmp_path):
             await daemon._handle_callback("slow", "tom", reply_fn)
 
         by_name = {name: resp for name, resp in replies}
-        assert "You're up early, Tom." not in by_name["progress"]["text"]
-        assert by_name["slow"]["text"].startswith("You're up early, Tom.")
+        assert "aside" not in by_name["progress"]
+        assert by_name["slow"]["aside"] == "You're up early, Tom."
 
     asyncio.run(run())
 
@@ -784,5 +783,75 @@ def test_watch_plugins_async_loop(tmp_path):
                 pass
 
         assert daemon.plugins[0].handle("echo", "tom")["text"] == "v2"
+
+    asyncio.run(run())
+
+
+@pytest.mark.real_voice
+def test_daemon_honours_the_flourishes_kill_switch(tmp_path):
+    """Deleting `config=self.config` from `_deliver` has to turn this red."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "echo.py": """
+            name = "echo"
+            commands = ["echo"]
+            def handle(text, actor):
+                return {"text": "ok"}
+        """
+        },
+    )
+    daemon = Daemon(
+        plugin_dir=plugin_dir,
+        transport_dir=str(tmp_path / "transports"),
+        config={"sandy": {"flourishes": "no"}},
+    )
+
+    async def run():
+        replies = []
+
+        async def reply_fn(name, resp):
+            replies.append((name, resp))
+
+        with patch("sandy.voice.time_of_day_aside", return_value="Wow, you're up late, Tom."):
+            await daemon._handle_callback("echo this", "tom", reply_fn)
+
+        assert "aside" not in replies[0][1]
+
+    asyncio.run(run())
+
+
+@pytest.mark.real_voice
+def test_daemon_speaks_when_the_kill_switch_is_off(tmp_path):
+    """Positive control for the test above."""
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "echo.py": """
+            name = "echo"
+            commands = ["echo"]
+            def handle(text, actor):
+                return {"text": "ok"}
+        """
+        },
+    )
+    daemon = Daemon(
+        plugin_dir=plugin_dir,
+        transport_dir=str(tmp_path / "transports"),
+        config={"sandy": {"flourishes": "yes"}},
+    )
+
+    async def run():
+        replies = []
+
+        async def reply_fn(name, resp):
+            replies.append((name, resp))
+
+        with patch("sandy.voice.time_of_day_aside", return_value="Wow, you're up late, Tom."):
+            await daemon._handle_callback("echo this", "tom", reply_fn)
+
+        assert replies[0][1]["aside"] == "Wow, you're up late, Tom."
 
     asyncio.run(run())

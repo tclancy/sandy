@@ -152,9 +152,11 @@ class Daemon:
     async def _deliver(self, text, actor, reply_fn, results, errors, tz: str | None = None):
         """Send every reply for one interaction, opening with Sandy's aside.
 
-        The aside is resolved once and attached to the first thing Sandy says —
-        not to progress lines, and never once per fanned-out response. See
-        ``sandy/voice.py`` for why it cannot live inside a plugin.
+        The aside is resolved once and attached to Sandy's first *answer* — not
+        to the progress lines that may precede it, and never once per fanned-out
+        response. It travels as its own ``aside`` field for the transport to
+        render; see ``sandy/voice.py`` for why it is neither spliced into the
+        text nor emitted from inside a plugin.
         """
         aside = voice.opening_aside(actor, tz=tz, config=self.config)
         spoken = False
@@ -162,7 +164,7 @@ class Daemon:
         async def say(plugin_name: str, response: dict) -> None:
             nonlocal spoken
             if not spoken:
-                response = voice.prepend_aside(response, aside)
+                response = voice.attach_aside(response, aside)
                 spoken = True
             await reply_fn(plugin_name, response)
 

@@ -1,6 +1,8 @@
 import textwrap
 from unittest.mock import patch
 
+import pytest
+
 import sandy.config as config_module
 from sandy.cli import (
     _format_audio,
@@ -474,3 +476,59 @@ def test_main_opens_with_the_aside_above_the_plugin_s_own_title(tmp_path, capsys
         main(["titled"])
     out = capsys.readouterr().out
     assert out.index("Wow, you're up late, Tom.") < out.index("Sandy Help")
+
+
+def _echo_plugin_dir(tmp_path):
+    return _make_plugins(
+        tmp_path,
+        {
+            "echo.py": """
+            name = "echo"
+            commands = ["echo"]
+            def handle(text, actor):
+                return {"text": "ok"}
+        """
+        },
+    )
+
+
+def _write_config(tmp_path, body: str, monkeypatch):
+    path = tmp_path / "sandy.toml"
+    path.write_text(textwrap.dedent(body))
+    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [path])
+    return path
+
+
+@pytest.mark.real_voice
+def test_main_honours_the_flourishes_kill_switch(tmp_path, capsys, monkeypatch):
+    """`[sandy] flourishes = "no"` has to reach the voice, not just exist.
+
+    Patches the inner clock-reading function, so `opening_aside`'s own config
+    handling runs for real — deleting `config=config` from `cli.main` turns
+    this red (sandy#183 review found nothing held that argument in place).
+    """
+    plugin_dir = _echo_plugin_dir(tmp_path)
+    _write_config(tmp_path, '[sandy]\nflourishes = "no"\n', monkeypatch)
+
+    with (
+        patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir),
+        patch("sandy.voice.time_of_day_aside", return_value="Wow, you're up late, Tom."),
+    ):
+        main(["echo this"])
+
+    assert "up late" not in capsys.readouterr().out
+
+
+@pytest.mark.real_voice
+def test_main_speaks_when_the_kill_switch_is_off(tmp_path, capsys, monkeypatch):
+    """Positive control for the test above — same setup, switch the other way."""
+    plugin_dir = _echo_plugin_dir(tmp_path)
+    _write_config(tmp_path, '[sandy]\nflourishes = "yes"\n', monkeypatch)
+
+    with (
+        patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir),
+        patch("sandy.voice.time_of_day_aside", return_value="Wow, you're up late, Tom."),
+    ):
+        main(["echo this"])
+
+    assert "up late" in capsys.readouterr().out

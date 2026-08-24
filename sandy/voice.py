@@ -32,6 +32,8 @@ from datetime import UTC, datetime
 from typing import Callable, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sandy.config import get_timezone
+
 # The hours a person would remark on, and what Sandy says about them. Both
 # windows are half-open on the right and expressed in the *requesting user's*
 # timezone, not the server's — 3 a.m. is only remarkable where the user is.
@@ -108,22 +110,28 @@ def flourishes_enabled(config: dict | None) -> bool:
 def _resolve_now(tz: str | None, now: datetime | None) -> datetime:
     """Return *now* (or the current time) expressed in *tz*.
 
-    An unparseable or unknown timezone falls back to the timestamp as given —
-    a bad tz string costs you the right flourish, never the reply.
+    An unparseable, unknown or non-string timezone falls back to the local
+    clock — a bad tz costs you the right flourish, never the reply.
 
-    The default clock is deliberately **aware**: a naive ``datetime.now()``
-    cannot be converted, so *tz* would be silently ignored and every user would
-    be greeted on the server's hour (sandy#183).
+    Two traps, both hit once already (sandy#183):
+
+    - the default clock must be **aware**, or ``astimezone`` cannot convert it
+      and *tz* is silently ignored;
+    - with no tz at all the answer is the **machine's** zone, not UTC. Sandy
+      remarks on the hour the person is living in, and on US Eastern a UTC
+      default would greet you at 8pm and go quiet at 3am.
     """
     moment = now if now is not None else datetime.now(UTC)
-    if not tz:
+    if moment.tzinfo is None:
+        # A naive *now* is taken to already be in the target zone — that is what
+        # ``datetime(2026, 8, 24, 3, 0)`` means when a caller passes it with a tz.
         return moment
+    if not tz:
+        return moment.astimezone()
     try:
         zone = ZoneInfo(tz)
-    except (ZoneInfoNotFoundError, ValueError):
-        return moment
-    if moment.tzinfo is None:
-        return moment
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        return moment.astimezone()
     return moment.astimezone(zone)
 
 
@@ -142,29 +150,38 @@ def opening_aside(
     if not flourishes_enabled(config):
         return None
 
-    effective_tz = tz
-    if not effective_tz and isinstance(config, dict):
-        section = config.get("sandy", {})
-        if isinstance(section, dict):
-            configured = section.get("timezone")
-            if isinstance(configured, str) and configured.strip():
-                effective_tz = configured.strip()
-
+    effective_tz = tz or (get_timezone(config) if isinstance(config, dict) else None)
     return time_of_day_aside(_resolve_now(effective_tz, now), actor, choice=choice)
 
 
-def prepend_aside(response: dict, aside: str | None) -> dict:
-    """Return a copy of *response* with *aside* above its text.
+def attach_aside(response: dict, aside: str | None) -> dict:
+    """Return a copy of *response* carrying *aside* as its own leading field.
 
-    Returns *response* unchanged when there is no aside, and never mutates the
-    caller's dict — plugin responses are shared with the transport layer.
+    Deliberately **not** spliced into ``text``. Doing that broke three things in
+    the Slack transport at once (sandy#183 review): it defeated the ``#122``
+    code-fence auto-promotion, whose regex is anchored at the start of ``text``;
+    it rendered the aside *below* the plugin's header block; and it spent the
+    3000-character section budget on a pleasantry, truncating the answer.
+
+    Transports that don't know the field ignore it, which degrades to today's
+    behaviour rather than to a crash. Returns *response* unchanged when there is
+    no aside, and never mutates the caller's dict — plugin responses are shared
+    with the transport layer.
     """
     if not aside:
         return response
-    merged = dict(response)
-    existing = merged.get("text")
-    merged["text"] = f"{aside}\n\n{existing}" if existing else aside
-    return merged
+    return {"aside": aside, **response}
+
+
+def _defused(text: str) -> str:
+    """Return *text* with Slack's control syntax neutralised.
+
+    Slack delivers ``@channel`` as ``<!channel>`` and a user mention as
+    ``<@U123>``. Echoing either back into a ``mrkdwn`` section makes *Sandy*
+    ping the channel to announce she didn't understand — so the brackets are
+    swapped for lookalikes that carry no meaning to Slack's parser.
+    """
+    return (text or "").strip().replace("<", "\u2039").replace(">", "\u203a")
 
 
 def did_not_understand(text: str) -> str:
@@ -174,7 +191,7 @@ def did_not_understand(text: str) -> str:
     to clarify." So this echoes what was heard and names the next move, rather
     than closing the conversation with a flat "unknown command".
     """
-    said = (text or "").strip()
+    said = _defused(text)
     if not said:
         return "I didn't catch that. Ask me for `help` and I'll show you what I know."
     if len(said) > _ECHO_LIMIT:

@@ -77,7 +77,13 @@ def format_response(plugin_name: str, response: dict) -> dict:
     """Translate a content plugin response dict into Slack Block Kit blocks.
 
     Recognised response keys:
-      title, text, code_text, links, image_url.
+      aside, title, text, code_text, links, image_url.
+
+    ``aside`` is Sandy's once-per-interaction flourish (``sandy/voice.py``) and
+    is rendered as a leading section, above the header — it is a greeting, and a
+    greeting under a header reads like a footnote. It is deliberately a field of
+    its own rather than a prefix on ``text``: prefixing broke the ``code_text``
+    promotion below, inverted block order, and ate the 3000-char text budget.
 
     ``code_text`` is rendered as a Slack ``rich_text_preformatted`` block — the
     parser-safe equivalent of a Markdown code fence. Prefer this over wrapping
@@ -90,6 +96,10 @@ def format_response(plugin_name: str, response: dict) -> dict:
     """
     logger.debug("Formatting response for plugin '%s': keys=%s", plugin_name, list(response.keys()))
     blocks = []
+
+    aside = response.get("aside")
+    if isinstance(aside, str) and aside:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": aside[:3000]}})
 
     if "title" in response:
         blocks.append(

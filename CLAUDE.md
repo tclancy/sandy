@@ -73,8 +73,16 @@ itself once per match the first time two plugins match the same phrase.
   `None` when the hour is unremarkable. **The silence is the feature**: a
   greeting on every command is a template, and a template reads as software.
   Sandy speaks up in the small hours (23:00–04:59) and early (05:00–06:59) and
-  says nothing the rest of the day.
-- `prepend_aside(response, aside)` — attaches it to the first thing Sandy says.
+  says nothing the rest of the day. The window is read in the *requesting
+  user's* zone — Slack's per-user `tz`, then `[sandy] timezone`, then the
+  machine's own clock. Never UTC: a UTC default greets an Eastern user at
+  8pm and goes quiet at 3am, which is the one case the feature exists for.
+- `attach_aside(response, aside)` — puts it on Sandy's first *answer* as its
+  own `aside` field, for the transport to render. Deliberately not spliced
+  into `text`: doing that defeated the `#122` code-fence promotion, put the
+  greeting *below* the header block, and spent the 3000-char Slack section
+  budget on a pleasantry. A transport that ignores the field degrades to
+  silence, not to a crash. The CLI prints it as its own line instead.
 - `did_not_understand(text)` — the shared "ask me to clarify" reply, so CLI and
   Slack cannot drift apart on the same condition (they had, before #183).
 
