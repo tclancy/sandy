@@ -90,7 +90,9 @@ sandy --actor michelle "crossword"
 ```
 
 If no plugin matches, Sandy says what she heard and points at `help`:
-`I'm not sure what to do with “wibble”. Ask me for `help` and I'll show you what I know.`
+
+> I'm not sure what to do with “wibble the frobnitz”. Ask me for `help` and I'll show you what I know.
+
 The CLI and Slack give the same answer — it comes from `sandy/voice.py`.
 
 ---
