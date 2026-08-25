@@ -70,26 +70,3 @@ def sentry_events():
     finally:
         sentry_sdk.flush()
         sentry_sdk.get_global_scope().set_client(None)
-
-
-@pytest.fixture(autouse=True)
-def _silence_the_voice(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Silence Sandy's time-of-day aside for the duration of each test.
-
-    ``sandy.voice.opening_aside`` reads the wall clock, so any test that
-    asserts on delivered response text would pass at 2 p.m. and fail at 3 a.m.
-    — the two existing daemon tests that pin an exact reply string did exactly
-    that when the voice landed (sandy#183). Freezing the nondeterminism here
-    keeps the rest of the suite time-independent.
-
-    This hides nothing: ``tests/test_voice.py`` exercises the real function
-    directly, and the boundary tests in ``test_cli.py`` / ``test_daemon.py``
-    patch ``voice.opening_aside`` themselves with a fixed aside, which
-    overrides this fixture and proves the wiring.
-
-    Tests of the voice itself carry ``@pytest.mark.real_voice`` and are left
-    alone.
-    """
-    if "real_voice" in request.keywords:
-        return
-    monkeypatch.setattr("sandy.voice.opening_aside", lambda *a, **kw: None)

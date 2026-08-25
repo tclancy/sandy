@@ -17,9 +17,6 @@ dependencies = [
 testpaths = ["tests"]
 addopts = "--cov=sandy --cov-report=term-missing --cov-fail-under=80"
 asyncio_mode = "auto"
-markers = [
-    "real_voice: opt out of the autouse voice silencer in tests/conftest.py",
-]
 
 [tool.coverage.run]
 source = ["sandy"]
@@ -66,7 +63,7 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff>=0.16.3",
+    "ruff>=0.16.4",
     "pre-commit>=4.6.2",
     "pytest-asyncio>=1.4.0",
 ]

@@ -6,8 +6,6 @@ import tempfile
 
 import requests
 
-from sandy import voice
-from sandy.config import apply_env, load_config
 from sandy.pipeline import run_pipeline
 from sandy.printer import print_pdf
 from sandy.progress import make_reporter
@@ -102,35 +100,19 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_usage(file=sys.stderr)
         return 1
 
-    config = load_config()
-    apply_env(config)
-
     results, errors = run_pipeline(
         args.text,
         args.actor,
-        config=config,
         progress_factory=make_reporter,
         tz=args.timezone,
     )
-
-    # One aside per interaction, resolved once, here at the delivery boundary —
-    # see sandy/voice.py for why it cannot live inside a plugin.
-    aside = voice.opening_aside(args.actor, tz=args.timezone, config=config)
 
     for plugin_name, error_msg in errors:
         print(f"{plugin_name} plugin failed: {error_msg}", file=sys.stderr)
 
     if not results and not errors:
-        if aside:
-            print(f"{aside}\n")
-        print(voice.did_not_understand(args.text))
+        print("I don't know how to do that yet.")
         return 1
-
-    # Stdout is a transcript, so the aside is its own line above everything —
-    # folding it into the first response would render it *below* that plugin's
-    # title. The daemon merges instead, because a transport reply is one message.
-    if aside:
-        print(f"{aside}\n")
 
     for i, (plugin_name, response) in enumerate(results):
         if i > 0:

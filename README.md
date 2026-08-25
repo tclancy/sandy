@@ -5,8 +5,8 @@ A personal automation tool that routes text commands to plugins. Named for
 — the idea that you should be able to send a casual message and have something
 useful happen on the other end. Eugene Wei's
 [I Want Sandy](https://www.eugenewei.com/blog/2014/1/7/i-want-sandy) explains why
-that felt so different, and it is the reason Sandy occasionally remarks on the
-hour instead of just answering. See **Inspiration** in `CLAUDE.md`.
+that felt so different, and it is the design brief this project is written
+against. See **Inspiration** in `CLAUDE.md`.
 
 Send Sandy a command from the CLI or via Slack, and the matching plugin(s)
 respond with links, audio, a printed PDF, or whatever else makes sense.
@@ -89,11 +89,7 @@ sandy "sports"
 sandy --actor michelle "crossword"
 ```
 
-If no plugin matches, Sandy says what she heard and points at `help`:
-
-> I'm not sure what to do with “wibble the frobnitz”. Ask me for `help` and I'll show you what I know.
-
-The CLI and Slack give the same answer — it comes from `sandy/voice.py`.
+If no plugin matches the command, Sandy responds: `I don't know how to do that yet.`
 
 ---
 

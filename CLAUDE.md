@@ -44,14 +44,22 @@ print a usage block.
 
 **3. Let people turn it off.** Wei, in the same post: "I know some folks would
 hate that type of false anthropomorphism, but perhaps you could choose whether
-to turn it on or off." Every flourish ships with a switch — see
-`[sandy] flourishes` in `sandy.toml.example`.
+to turn it on or off." So any flourish that ever ships here ships with a switch,
+and the switch is part of the feature, not a follow-up.
+
+**A caution that belongs with the three, because it is the first thing this
+section caused.** Sandy has *no* time-of-day greeting, and that is a decision,
+not a gap. The first attempt at one (#183) was reverted before merge — see the
+CHANGELOG entry for 2026-08-24 and PR #184. The lesson is not "no flourishes";
+it is that a flourish is a thing Tom picks, not a thing an agent infers from
+this page. Point at a specific string you want warmer. Do not add an
+unprompted personality layer on the strength of the quote above.
 
 ### What this means when you write a string
 
 | Instead of | Say |
 |------------|-----|
-| `Unknown command: 'wibble'` | `I'm not sure what to do with "wibble". Ask me for help and I'll show you what I know.` |
+| `Unknown command: 'wibble'` | `I don't know how to do that yet.` (`cli.py`'s current line) |
 | `ERROR: plugin raised RuntimeError` | `I am terribly sorry, cryptics just does not want to behave!` |
 | `Playlist updated (23 tracks)` | `Saved 23 tracks to 'Discovery'.` — say what *you did*, not what changed |
 | Silence on interrupt | `Wrapping up early today!` (`cli.py` already does this — copy that register) |
@@ -59,40 +67,19 @@ to turn it on or off." Every flourish ships with a switch — see
 Sandy talks like a capable assistant who is slightly amused by the job. Warm,
 brief, first person, never cute for its own sake, and never emoji-as-tone.
 
-### The one hard rule: asides live at the boundary, not in plugins
+### The one hard rule: interaction-level output lives at the boundary
 
 Sandy fans out — **all** matching plugins answer a single command. So anything
 that belongs to the *interaction* rather than the *answer* must be emitted once,
 at the delivery boundary (`cli.main`, `daemon._handle_callback`), never from
 inside a plugin's `handle()`. A friendly greeting written into a plugin repeats
-itself once per match the first time two plugins match the same phrase.
+itself once per match the first time two plugins match the same phrase, and the
+second plugin is usually one nobody was thinking about when the greeting was
+written.
 
-`sandy/voice.py` owns this. It exposes:
-
-- `opening_aside(actor, tz=, config=)` — the once-per-interaction aside, or
-  `None` when the hour is unremarkable. **The silence is the feature**: a
-  greeting on every command is a template, and a template reads as software.
-  Sandy speaks up in the small hours (23:00–04:59) and early (05:00–06:59) and
-  says nothing the rest of the day. The window is read in the *requesting
-  user's* zone — Slack's per-user `tz`, then `[sandy] timezone`, then the
-  machine's own clock. Never UTC: a UTC default greets an Eastern user at
-  8pm and goes quiet at 3am, which is the one case the feature exists for.
-- `attach_aside(response, aside)` — puts it on Sandy's first *answer* as its
-  own `aside` field, for the transport to render. Deliberately not spliced
-  into `text`: doing that defeated the `#122` code-fence promotion, put the
-  greeting *below* the header block, and spent the 3000-char Slack section
-  budget on a pleasantry. A transport that ignores the field degrades to
-  silence, not to a crash. The CLI prints it as its own line instead.
-- `did_not_understand(text)` — the shared "ask me to clarify" reply, so CLI and
-  Slack cannot drift apart on the same condition (they had, before #183).
-
-Plugins must not import `sandy.voice`.
-
-**Testing note:** `opening_aside` reads the wall clock, so `tests/conftest.py`
-carries an autouse fixture that silences it. A test that needs the real thing
-carries `@pytest.mark.real_voice`; a boundary test that wants a fixed aside
-patches `voice.opening_aside` directly. Without that fixture, any test pinning
-an exact reply string passes at 2 p.m. and fails at 3 a.m.
+The same rule covers anything else that is per-interaction rather than
+per-answer: a footer, a disclaimer, a "took 4.2s". Emit it once, at the
+boundary, or not at all.
 
 ### Orchestration Role
 
@@ -149,8 +136,6 @@ CLI mode is stateless. Daemon mode (`sandy serve`) is long-running and transport
 - **transport_loader.py** — transport discovery from `sandy/transports/`
 - **printer.py** — PDF download + printing (CUPS and IPP URI support)
 - **progress.py** — real-time status reporting (CLI stderr / daemon async queue)
-- **voice.py** — once-per-interaction flourishes and the shared didn't-understand
-  reply; called only from the delivery boundary, never from a plugin (see Inspiration)
 
 ## Plugin Contract
 

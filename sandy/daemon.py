@@ -7,7 +7,6 @@ import signal
 import sys
 from pathlib import Path
 
-from sandy import voice
 from sandy.config import apply_env, find_config_path, load_config
 from sandy.loader import load_plugins
 from sandy import oauth_server
@@ -114,26 +113,25 @@ class Daemon:
             logger.warning("Pipeline errors: %s", errors)
         return results, errors
 
-    async def _run_with_progress(self, text, actor, reply_fn, tz: str | None = None):
-        """Run the pipeline, streaming progress messages back as they arrive.
+    async def _handle_callback(self, text, actor, reply_fn, tz: str | None = None):
+        """Process an incoming message through the pipeline and send replies.
 
-        The drain task is what turns a plugin's synchronous ``progress()`` calls
-        into transport replies; it is closed in a ``finally`` so a raising
-        pipeline still stops the queue rather than leaking the task.
+        The ``sleep(0)`` before the sentinel is load-bearing. A plugin's
+        ``progress()`` runs on the executor thread and schedules its
+        ``put_nowait`` with ``call_soon_threadsafe``; the pipeline's own
+        completion is scheduled the same way. Resuming here does **not** prove
+        the progress callback has run, so putting the sentinel immediately can
+        overtake a message the plugin already emitted — the drain then sees
+        ``None`` first and exits, and the message is delivered to nobody.
+        Yielding once lets the whole pending callback batch run first, and the
+        queue is FIFO from there on.
 
-        The ``sleep(0)`` before the sentinel is load-bearing. ``progress()`` runs
-        on the executor thread and schedules its ``put_nowait`` with
-        ``call_soon_threadsafe``; the pipeline's own completion is scheduled the
-        same way. Resuming here does **not** prove the progress callback has run,
-        so putting the sentinel immediately can overtake a message the plugin
-        already emitted — the drain then sees ``None`` first and exits, and the
-        message is delivered to nobody. Yielding once lets the whole pending
-        callback batch run first, and the queue is FIFO from there on.
-
-        Observed as a CI failure on Linux/CPython 3.13.15 while this suite passes
-        on macOS/3.13.7 (sandy#183); it is a pre-existing daemon bug that no test
-        covered before, not a regression from the voice work.
+        Observed as a CI failure on Linux/CPython 3.13.15 while this suite
+        passes on macOS/3.13.7 (sandy#183); it is a pre-existing daemon bug
+        that no test covered before, not a regression.
         """
+        logger.debug("Callback invoked: text='%s', actor='%s', tz='%s'", text, actor, tz)
+
         loop = asyncio.get_running_loop()
         progress_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -149,57 +147,28 @@ class Daemon:
 
         drain_task = asyncio.create_task(drain_progress())
         try:
-            return await self.handle_message(text, actor, progress_factory=make_progress, tz=tz)
+            results, errors = await self.handle_message(
+                text, actor, progress_factory=make_progress, tz=tz
+            )
         finally:
             await asyncio.sleep(0)  # let pending progress callbacks land first
             await progress_queue.put(None)
             await drain_task
 
-    @staticmethod
-    def _error_reply(plugin_name: str, error_msg: str) -> dict:
-        """Turn a plugin exception into something Sandy would actually say."""
-        friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
-        if error_msg:
-            friendly = f"{friendly} `{error_msg[:100]}`"
-        return {"text": friendly}
-
-    async def _deliver(self, text, actor, reply_fn, results, errors, tz: str | None = None):
-        """Send every reply for one interaction, opening with Sandy's aside.
-
-        The aside is resolved once and attached to Sandy's first *answer* — not
-        to the progress lines that may precede it, and never once per fanned-out
-        response. It travels as its own ``aside`` field for the transport to
-        render; see ``sandy/voice.py`` for why it is neither spliced into the
-        text nor emitted from inside a plugin.
-        """
-        aside = voice.opening_aside(actor, tz=tz, config=self.config)
-        spoken = False
-
-        async def say(plugin_name: str, response: dict) -> None:
-            nonlocal spoken
-            if not spoken:
-                response = voice.attach_aside(response, aside)
-                spoken = True
-            await reply_fn(plugin_name, response)
-
         for plugin_name, response in results:
             logger.debug("Dispatching reply for '%s' back to transport", plugin_name)
             if "pdf_url" in response:
                 response = await self._handle_pdf_response(response)
-            await say(plugin_name, response)
-
+            await reply_fn(plugin_name, response)
         for plugin_name, error_msg in errors:
             logger.debug("Dispatching error reply for '%s': %s", plugin_name, error_msg)
-            await say("error", self._error_reply(plugin_name, error_msg))
-
+            friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
+            if error_msg:
+                detail = error_msg[:100]
+                friendly = f"{friendly} `{detail}`"
+            await reply_fn("error", {"text": friendly})
         if not results and not errors:
-            await say("sandy", {"text": voice.did_not_understand(text)})
-
-    async def _handle_callback(self, text, actor, reply_fn, tz: str | None = None):
-        """Process an incoming message through the pipeline and send replies."""
-        logger.debug("Callback invoked: text='%s', actor='%s', tz='%s'", text, actor, tz)
-        results, errors = await self._run_with_progress(text, actor, reply_fn, tz=tz)
-        await self._deliver(text, actor, reply_fn, results, errors, tz=tz)
+            await reply_fn("sandy", {"text": "Sorry, I'm not sure how to do that."})
 
     async def _handle_pdf_response(self, response: dict) -> dict:
         """Attempt to print a PDF and update the response text to reflect the outcome.
