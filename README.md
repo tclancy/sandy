@@ -1,9 +1,12 @@
 # Sandy
 
-A personal automation tool that routes text commands to plugins. Inspired by
-[I Want Sandy](https://boingboing.net/2007/11/14/i-want-sandy-perfect.html) — the
-idea that you should be able to send a casual message and have something useful
-happen on the other end.
+A personal automation tool that routes text commands to plugins. Named for
+[I Want Sandy](https://boingboing.net/2007/11/14/i-want-sandy-perfect.html) (2007)
+— the idea that you should be able to send a casual message and have something
+useful happen on the other end. Eugene Wei's
+[2014 essay on why it worked](https://www.eugenewei.com/blog/2014/1/7/i-want-sandy)
+is the design brief this project is written against. See **Inspiration** in
+`CLAUDE.md`.
 
 Send Sandy a command from the CLI or via Slack, and the matching plugin(s)
 respond with links, audio, a printed PDF, or whatever else makes sense.

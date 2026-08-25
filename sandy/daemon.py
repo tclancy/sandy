@@ -114,7 +114,25 @@ class Daemon:
         return results, errors
 
     async def _handle_callback(self, text, actor, reply_fn, tz: str | None = None):
-        """Process an incoming message through the pipeline and send replies."""
+        """Process an incoming message through the pipeline and send replies.
+
+        The ``sleep(0)`` before the sentinel is load-bearing. A plugin's
+        ``progress()`` runs on the executor thread and schedules its
+        ``put_nowait`` with ``call_soon_threadsafe``; the pipeline's own
+        completion is scheduled the same way. Resuming here does **not** prove
+        the progress callback has run, so putting the sentinel immediately can
+        overtake a message the plugin already emitted — the drain then sees
+        ``None`` first and exits, and the message is delivered to nobody.
+        Yielding once lets the whole pending callback batch run first, and the
+        queue is FIFO from there on.
+
+        Observed as a CI failure on Linux/CPython 3.13.15 while this suite
+        passes on macOS/3.13.7 (sandy#183); it is a pre-existing daemon bug
+        that no test covered before, not a regression.
+
+        Because that yield is cancellable, the teardown carries its own
+        ``finally`` that cancels the drain task -- see the comment there.
+        """
         logger.debug("Callback invoked: text='%s', actor='%s', tz='%s'", text, actor, tz)
 
         loop = asyncio.get_running_loop()
@@ -136,8 +154,16 @@ class Daemon:
                 text, actor, progress_factory=make_progress, tz=tz
             )
         finally:
-            await progress_queue.put(None)
-            await drain_task
+            try:
+                await asyncio.sleep(0)  # let pending progress callbacks land first
+                await progress_queue.put(None)
+                await drain_task
+            finally:
+                # The sleep(0) above is a real suspension point, so SIGTERM can
+                # land there and skip the sentinel entirely -- which would leave
+                # drain_task pending on get() forever. cancel() is a no-op on a
+                # task that already finished, so the happy path is unaffected.
+                drain_task.cancel()
 
         for plugin_name, response in results:
             logger.debug("Dispatching reply for '%s' back to transport", plugin_name)

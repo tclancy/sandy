@@ -3,8 +3,10 @@
 ## What Is Sandy
 
 Sandy is a CLI tool and Slack bot that routes freeform text commands to plugins.
-Inspired by [I Want Sandy](https://boingboing.net/2007/11/14/i-want-sandy-perfect.html).
-The goal is to "bring delight" — surfacing things you care about with minimal friction.
+Named for [I Want Sandy](https://boingboing.net/2007/11/14/i-want-sandy-perfect.html)
+(2007). The goal is to "bring delight" — surfacing things you care about with
+minimal friction. **Read the Inspiration section below before writing any
+user-facing string.**
 
 Fan-out model: **all** matching plugins respond to a command, not just the first match.
 
@@ -25,6 +27,80 @@ homelab.local (/home/tom/sources/)
 Everything runs co-located. No SSH hops, no Docker for Sandy itself.
 See the Orchestration project doc in Obsidian for full context:
 `/Users/tom/Documents/notes/tclancy/Dispatch/Projects/Orchestration.md`
+
+## Inspiration — why Sandy is called Sandy
+
+The name comes from **I Want Sandy**, a 2007 virtual assistant you used by
+sending it email in plain English: *"Sandy, remind me to pick up the dry
+cleaning at 6:50pm tonight."* It shut down in 2008 and people still miss it.
+Eugene Wei's [write-up of why](https://www.eugenewei.com/blog/2014/1/7/i-want-sandy)
+is the design brief for this project — read it once; it is short.
+
+**Read this before the three points below, because it is the first thing this
+section caused.** Sandy has *no* time-of-day greeting, and that is a decision,
+not a gap. The first attempt at one (#183) was reverted before merge — see the
+CHANGELOG entry for 2026-08-24 and PR #184. The lesson is not "no flourishes";
+it is that a flourish is a thing Tom picks, not a thing an agent infers from
+this page. Point at a specific string you want warmer. Do not add an unprompted
+personality layer on the strength of the quotes below.
+
+Three things from that post are load-bearing here, in descending order of how
+often they get forgotten:
+
+**1. Tiny flourishes go a long way.** Wei's example is the whole thesis:
+
+> One time I recall sending IWantSandy an email at 3 in the morning asking
+> "her" to remind me of something the next morning. Her reply began with
+> "Wow! You're up late! Get some sleep soon" or something like that. Simple to
+> code, powerfully effective.
+
+That is one `if` statement on an hour. It is also the single most memorable
+thing anyone wrote about the product, seven years after it died. When you are
+choosing between a correct string and a human one, the human one is the
+product.
+
+**2. The most efficient way to do something is not always the most human.**
+Email was a *worse* interface than a form — you had to wait for a reply, and
+you had to re-send when Sandy misunderstood. It was better anyway, because
+"interacting with it in a manner typically reserved for interacting with other
+humans created a powerful illusion of intimacy". This is why Sandy takes
+freeform text and substring-matches it rather than exposing subcommands and
+flags, and why a misunderstanding should ask for clarification rather than
+print a usage block.
+
+**3. Let people turn it off.** Wei, in the same post: "I know some folks would
+hate that type of false anthropomorphism, but perhaps you could choose whether
+to turn it on or off." So any flourish that ever ships here ships with a switch,
+and the switch is part of the feature, not a follow-up.
+
+### What this means when you write a string
+
+| Instead of | Say |
+|------------|-----|
+| `Unknown command: 'wibble'` | `I don't know how to do that yet.` (`cli.py`'s current line) |
+| `ERROR: plugin raised RuntimeError` | `I am terribly sorry, cryptics just does not want to behave!` |
+| `Playlist updated (23 tracks)` | `Saved 23 tracks to 'Discovery'.` — say what *you did*, not what changed |
+| Silence on interrupt | `Wrapping up early today!` (`cli.py` already does this — copy that register) |
+
+Sandy talks like a capable assistant who is slightly amused by the job. Warm,
+brief, first person, never cute for its own sake, and never emoji-as-tone. That
+last one is a deliberate departure from the post, which floats "what if there
+were a smiley emoji at the end of the text?" — house style says no. Tone comes
+from the words.
+
+### The one hard rule: interaction-level output lives at the boundary
+
+Sandy fans out — **all** matching plugins answer a single command. So anything
+that belongs to the *interaction* rather than the *answer* must be emitted once,
+at the delivery boundary (`cli.main`, `daemon._handle_callback`), never from
+inside a plugin's `handle()`. A friendly greeting written into a plugin repeats
+itself once per match the first time two plugins match the same phrase, and the
+second plugin is usually one nobody was thinking about when the greeting was
+written.
+
+The same rule covers anything else that is per-interaction rather than
+per-answer: a footer, a disclaimer, a "took 4.2s". Emit it once, at the
+boundary, or not at all.
 
 ## Key Docs
 
