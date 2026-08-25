@@ -691,3 +691,88 @@ def test_callback_lets_a_pending_progress_callback_land_before_the_sentinel(tmp_
         assert replies[0][1]["text"] == "[slow] working on it"
 
     asyncio.run(run())
+
+
+def test_callback_cancels_the_drain_task_if_cancelled_at_the_yield(tmp_path):
+    """SIGTERM can land on the ``sleep(0)`` yield; the drain task must not leak.
+
+    ``Daemon.run`` cancels the transport task on SIGTERM/SIGINT, and
+    ``_handle_callback`` runs inside it. Before the fix above there was no
+    cancellable suspension point in the teardown — ``Queue.put`` on an unbounded
+    queue short-circuits to ``put_nowait`` — so the sentinel always reached the
+    drain. The ``sleep(0)`` is a real yield, so cancellation there would skip
+    both the sentinel and the join and strand ``drain_progress`` on ``get()``
+    forever ("Task was destroyed but it is pending!" at shutdown).
+    """
+    daemon = Daemon(
+        plugin_dir=_make_plugins(tmp_path, "plugins", {}),
+        transport_dir=str(tmp_path / "transports"),
+    )
+
+    async def fake_handle_message(_self, text, actor, progress_factory=None, tz=None):
+        return [], []
+
+    async def run():
+        async def reply_fn(name, resp):
+            pass
+
+        before = asyncio.all_tasks()
+        with (
+            patch.object(Daemon, "handle_message", fake_handle_message),
+            patch("sandy.daemon.asyncio.sleep", side_effect=asyncio.CancelledError),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await daemon._handle_callback("anything", "tom", reply_fn)
+
+        drain = [t for t in asyncio.all_tasks() if t not in before]
+        assert len(drain) == 1, "expected exactly one drain task to inspect"
+        await asyncio.sleep(0)  # let the cancellation land
+        assert drain[0].cancelled(), "drain task was left pending — it will leak at shutdown"
+
+    asyncio.run(run())
+
+
+def test_callback_delivers_progress_through_the_real_executor_path(tmp_path):
+    """The canary: a real plugin, through the real ``to_thread`` pipeline.
+
+    This is the shape of the test that actually caught the dropped-progress bug
+    — on Linux/CPython 3.13.15 CI, where the interleaving goes the bad way. It
+    is deliberately kept alongside the deterministic test above rather than
+    replaced by it, because the deterministic one patches ``handle_message``
+    out and therefore never exercises the executor hand-off. If someone later
+    refactors that path, this is what notices.
+
+    **Do not treat this as the guard.** It is green on macOS/3.13.7 with the
+    ``sleep(0)`` removed — measured, not assumed — so a local pass proves
+    nothing. The guard is
+    ``test_callback_lets_a_pending_progress_callback_land_before_the_sentinel``.
+    """
+    plugin_dir = _make_plugins(
+        tmp_path,
+        "plugins",
+        {
+            "slow.py": """
+            name = "slow"
+            commands = ["slow"]
+            def handle(text, actor, progress=None):
+                if progress:
+                    progress("working on it")
+                return {"text": "done"}
+        """
+        },
+    )
+    daemon = Daemon(plugin_dir=plugin_dir, transport_dir=str(tmp_path / "transports"))
+
+    async def run():
+        replies = []
+
+        async def reply_fn(name, resp):
+            replies.append((name, resp))
+
+        await daemon._handle_callback("slow", "tom", reply_fn)
+
+        assert [name for name, _ in replies] == ["progress", "slow"]
+        assert replies[0][1]["text"] == "[slow] working on it"
+        assert replies[1][1]["text"] == "done"
+
+    asyncio.run(run())
