@@ -251,6 +251,40 @@ def _call_dispatchd(path: str, *, method: str = "GET", payload: dict | None = No
         return json.loads(resp.read().decode("utf-8"))
 
 
+# Cloudflare generates these itself when it cannot get a usable response out of
+# the origin (520-527 plus 530, which is the one that carries an Argo Tunnel
+# 1033). dispatchd serves on 127.0.0.1 only — every Sandy request arrives
+# through the tunnel — so it is structurally incapable of emitting any of them.
+# A status in here is the edge's verdict about an origin that did not answer,
+# never dispatchd's own reply, and the distinction matters twice: the Slack copy
+# must not blame dispatchd for a response it never sent, and Sentry must not
+# open an incident because Tom's Mac was asleep (#190 / SANDY-4).
+#
+# Deliberately a named range rather than "any 5xx": dispatchd returning 500 is
+# exactly the thing this Sentry project exists to report, and 502/504 are
+# ambiguous between the tunnel and the daemon, so they stay incidents.
+_CLOUDFLARE_ORIGIN_ERROR_CODES = frozenset(range(520, 528)) | {530}
+
+
+def _is_unreachable(exc: Exception) -> bool:
+    """True when the failure means dispatchd never answered at all.
+
+    Three spellings of one condition: the connection never opened
+    (``URLError``), it opened and then went quiet (``TimeoutError``), or
+    Cloudflare answered on the origin's behalf to say it could not reach it.
+    All three mean "the Mac is asleep or off-network", which is an ordinary
+    state here rather than a Sandy defect.
+
+    The ``HTTPError`` branch must come first: ``HTTPError`` *subclasses*
+    ``URLError``, so testing ``URLError`` first would call every HTTP status
+    unreachable — including a 401, which is a bad key and the most
+    incident-shaped thing this plugin can hit.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in _CLOUDFLARE_ORIGIN_ERROR_CODES
+    return isinstance(exc, (urllib.error.URLError, TimeoutError))
+
+
 def _http_error_message(exc: Exception, kind: str) -> str:
     """Format a Sandy-friendly error for an HTTP call failure.
 
@@ -259,6 +293,13 @@ def _http_error_message(exc: Exception, kind: str) -> str:
     log and Sentry, not in Slack.
     """
     if isinstance(exc, urllib.error.HTTPError):
+        if exc.code in _CLOUDFLARE_ORIGIN_ERROR_CODES:
+            # Same "unreachable" wording as the two branches below, because it
+            # is the same condition — only the messenger differs.
+            return (
+                f"dispatchd unreachable (Cloudflare got no answer from the Mac, "
+                f"error {exc.code}) for {kind}. It's likely asleep or off-network."
+            )
         return f"dispatchd returned {exc.code} for {kind}."
     if isinstance(exc, urllib.error.URLError):
         return f"dispatchd unreachable ({exc.reason}) for {kind}."
@@ -509,15 +550,18 @@ def _post_command(command: _WriteCommand, payload: dict) -> PluginResponse:
         return {"title": command.title, "text": command.format(envelope)}
     except urllib.error.HTTPError as exc:
         # 4xx here is the endpoint working as designed (bad input, missing cap,
-        # busy) — user-facing control flow, not an incident. Only 5xx is.
-        if exc.code >= 500:
+        # busy) — user-facing control flow, not an incident. Only 5xx is, and
+        # not even all of those: a Cloudflare origin error is "the request never
+        # arrived", which is the same category as a refused connection (#190).
+        if exc.code >= 500 and not _is_unreachable(exc):
             capture(exc, plugin="dispatch", stage=command.kind)
         return {
             "title": command.title,
             "text": _write_http_error_message(exc, command.kind, command.error_text),
         }
     except Exception as exc:
-        capture(exc, plugin="dispatch", stage=command.kind)
+        if not _is_unreachable(exc):
+            capture(exc, plugin="dispatch", stage=command.kind)
         return {"title": command.title, "text": _http_error_message(exc, command.kind)}
 
 
@@ -709,7 +753,8 @@ def _run_command(command: _Command) -> PluginResponse:
         envelope = _call_dispatchd(command.path)
         return {"title": command.title, "text": command.format(envelope)}
     except Exception as exc:
-        capture(exc, plugin="dispatch", stage=command.kind)
+        if not _is_unreachable(exc):
+            capture(exc, plugin="dispatch", stage=command.kind)
         return {"title": command.title, "text": _http_error_message(exc, command.kind)}
 
 
