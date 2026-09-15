@@ -6,6 +6,7 @@ import hashlib
 import hmac as hmac_mod
 import io
 import json
+import logging
 import textwrap
 import urllib.error
 
@@ -425,12 +426,54 @@ def test_write_path_also_exempts_cloudflare_origin_errors(http_backend, monkeypa
         return fake
 
     monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", raise_code(530))
-    dispatch_plugin.handle("dispatch shift night", "tom")
+    text = dispatch_plugin.handle("dispatch shift night", "tom")["text"]
     assert captured == []
+    # The write path reaches the copy by a different route (_write_http_error_
+    # message -> _read_error_payload returns None on Cloudflare's HTML body ->
+    # _http_error_message), so it needs pinning separately from the read path.
+    assert "dispatchd returned" not in text
+    assert "unreachable" in text
 
     monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", raise_code(500))
     dispatch_plugin.handle("dispatch shift night", "tom")
     assert len(captured) == 1
+
+
+def test_write_path_generic_branch_also_exempts_unreachability(http_backend, monkeypatch):
+    """A URLError on a POST misses the HTTPError branch entirely and lands in
+    the generic one. That guard was untested when first written -- deleting it
+    left all 123 tests green -- which is why the policy now lives in a single
+    `_report`."""
+    captured = _capture_list(monkeypatch)
+
+    def fake(path, *, method="GET", payload=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(dispatch_plugin, "_call_dispatchd", fake)
+    dispatch_plugin.handle("dispatch shift night", "tom")
+    assert captured == []
+
+
+def test_unreachability_still_leaves_a_log_record(http_backend, monkeypatch, caplog):
+    """#129: this codebase went two months with a silent Sentry because its
+    plugins swallow their own failures. Exempting unreachability from capture
+    must not recreate that -- it downgrades the record, it does not delete it."""
+    _capture_list(monkeypatch)
+    _stub_call_raises(monkeypatch, _make_http_error(530))
+    with caplog.at_level(logging.WARNING, logger=dispatch_plugin.logger.name):
+        dispatch_plugin.handle("dispatch pm", "tom")
+    assert [r for r in caplog.records if "unreachable" in r.getMessage()]
+
+
+def test_a_real_incident_is_captured_rather_than_only_logged(http_backend, monkeypatch, caplog):
+    """The control for the test above: proves the log path is the *exception*,
+    not what every failure now does."""
+    captured = _capture_list(monkeypatch)
+    _stub_call_raises(monkeypatch, _make_http_error(500))
+    with caplog.at_level(logging.WARNING, logger=dispatch_plugin.logger.name):
+        dispatch_plugin.handle("dispatch pm", "tom")
+    assert len(captured) == 1
+    assert not [r for r in caplog.records if "unreachable" in r.getMessage()]
 
 
 # ---------------------------------------------------------------------------

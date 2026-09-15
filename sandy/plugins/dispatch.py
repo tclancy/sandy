@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -42,6 +43,8 @@ import urllib.request
 from typing import Callable, NamedTuple, NotRequired, TypedDict
 
 from sandy.observability import capture
+
+logger = logging.getLogger(__name__)
 
 name = "dispatch"
 commands = [
@@ -260,9 +263,17 @@ def _call_dispatchd(path: str, *, method: str = "GET", payload: dict | None = No
 # must not blame dispatchd for a response it never sent, and Sentry must not
 # open an incident because Tom's Mac was asleep (#190 / SANDY-4).
 #
-# Deliberately a named range rather than "any 5xx": dispatchd returning 500 is
-# exactly the thing this Sentry project exists to report, and 502/504 are
-# ambiguous between the tunnel and the daemon, so they stay incidents.
+# Deliberately a named range rather than "any 5xx", and 502 is the reason why.
+# In a cloudflared ingress the two failure modes separate cleanly: connector
+# gone (Mac asleep) is 530/1033, while connector up and 127.0.0.1:8787 refusing
+# is cloudflared's own 502. That second one — Mac awake, daemon dead — is
+# precisely the incident worth reporting, so it stays out of this set, as does
+# a 500 from dispatchd itself.
+#
+# 522/524/527 can't actually arrive: Cloudflare raises 522 at ~15s and 524 at
+# ~100s, and `_HTTP_TIMEOUT_SECONDS` abandons the request at 5, so a slow origin
+# reaches us as a bare `TimeoutError` first. They are listed anyway because
+# excluding them would contradict the `TimeoutError` arm of `_is_unreachable`.
 _CLOUDFLARE_ORIGIN_ERROR_CODES = frozenset(range(520, 528)) | {530}
 
 
@@ -283,6 +294,28 @@ def _is_unreachable(exc: Exception) -> bool:
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code in _CLOUDFLARE_ORIGIN_ERROR_CODES
     return isinstance(exc, (urllib.error.URLError, TimeoutError))
+
+
+def _report(exc: Exception, stage: str) -> None:
+    """Record a handled failure at the severity it deserves.
+
+    Unreachability gets a log line and no Sentry event. It still gets
+    *something*, because the 2026-06-30 #129 entry in ``CHANGELOG.md`` is this
+    codebase's own account of what silence costs — Sentry saw nothing for two
+    months precisely because these plugins swallow their own failures. A
+    ``logger`` record is the cheap middle: ``observability`` installs
+    ``LoggingIntegration(event_level=None)``, so it becomes a *breadcrumb*
+    rather than an event, and the trail is there on any later real incident
+    without opening one here.
+
+    Every capture decision in this plugin goes through this function. Keeping
+    the rule in one place is not tidiness — an earlier revision inlined it at
+    three call sites and one of the three went untested.
+    """
+    if _is_unreachable(exc):
+        logger.warning("dispatchd unreachable (%s) for %s", exc, stage)
+        return
+    capture(exc, plugin="dispatch", stage=stage)
 
 
 def _http_error_message(exc: Exception, kind: str) -> str:
@@ -553,15 +586,14 @@ def _post_command(command: _WriteCommand, payload: dict) -> PluginResponse:
         # busy) — user-facing control flow, not an incident. Only 5xx is, and
         # not even all of those: a Cloudflare origin error is "the request never
         # arrived", which is the same category as a refused connection (#190).
-        if exc.code >= 500 and not _is_unreachable(exc):
-            capture(exc, plugin="dispatch", stage=command.kind)
+        if exc.code >= 500:
+            _report(exc, command.kind)
         return {
             "title": command.title,
             "text": _write_http_error_message(exc, command.kind, command.error_text),
         }
     except Exception as exc:
-        if not _is_unreachable(exc):
-            capture(exc, plugin="dispatch", stage=command.kind)
+        _report(exc, command.kind)
         return {"title": command.title, "text": _http_error_message(exc, command.kind)}
 
 
@@ -753,8 +785,7 @@ def _run_command(command: _Command) -> PluginResponse:
         envelope = _call_dispatchd(command.path)
         return {"title": command.title, "text": command.format(envelope)}
     except Exception as exc:
-        if not _is_unreachable(exc):
-            capture(exc, plugin="dispatch", stage=command.kind)
+        _report(exc, command.kind)
         return {"title": command.title, "text": _http_error_message(exc, command.kind)}
 
 
