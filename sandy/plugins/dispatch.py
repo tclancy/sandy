@@ -264,11 +264,17 @@ def _call_dispatchd(path: str, *, method: str = "GET", payload: dict | None = No
 # open an incident because Tom's Mac was asleep (#190 / SANDY-4).
 #
 # Deliberately a named range rather than "any 5xx", and 502 is the reason why.
-# In a cloudflared ingress the two failure modes separate cleanly: connector
-# gone (Mac asleep) is 530/1033, while connector up and 127.0.0.1:8787 refusing
-# is cloudflared's own 502. That second one — Mac awake, daemon dead — is
-# precisely the incident worth reporting, so it stays out of this set, as does
-# a 500 from dispatchd itself.
+# In a cloudflared ingress the two failure modes are *expected* to separate:
+# connector gone (Mac asleep) is 530/1033, while connector up and
+# 127.0.0.1:8787 refusing is typically cloudflared's own 502. That second one —
+# Mac awake, daemon dead — is precisely the incident worth reporting, so it
+# stays out of this set, as does a 500 from dispatchd itself.
+#
+# "Typically" is doing real work there: this is reasoned from how cloudflared
+# behaves, not observed on this tunnel, and an origin-refused can surface as
+# 521/523 depending on version and config. The conclusion does not depend on
+# it — 502 is ambiguous between the tunnel and the daemon under every reading,
+# and ambiguous means it stays an incident.
 #
 # 522/524/527 can't actually arrive: Cloudflare raises 522 at ~15s and 524 at
 # ~100s, and `_HTTP_TIMEOUT_SECONDS` abandons the request at 5, so a slow origin
