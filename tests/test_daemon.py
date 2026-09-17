@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from sandy.daemon import Daemon, _missing_required_plugins, _plugin_snapshot
+from sandy.pipeline import NO_MATCH_MESSAGE
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +146,15 @@ def test_daemon_no_match(tmp_path):
 
 
 def test_callback_no_match_sends_fallback(tmp_path):
-    """Daemon callback sends fallback reply when no plugins match."""
+    """Daemon callback sends the shared fallback reply when no plugins match.
+
+    Calls ``_handle_callback`` rather than re-implementing its dispatch loop.
+    The previous version of this test did the latter -- it ran
+    ``handle_message`` and then re-typed the ``if not results and not errors``
+    branch, including the literal -- so it asserted against its own copy of the
+    production code and stayed green no matter what ``daemon.py`` actually
+    said. Its docstring already claimed it called the callback "directly".
+    """
     plugin_dir = _make_plugins(
         tmp_path,
         "plugins",
@@ -166,40 +175,9 @@ def test_callback_no_match_sends_fallback(tmp_path):
         async def reply_fn(name, resp):
             replies.append((name, resp))
 
-        # Build the callback the same way run() does and call it directly
-        loop = asyncio.get_running_loop()
-        progress_queue = asyncio.Queue()
+        await daemon._handle_callback("unknown", "tom", reply_fn)
 
-        def make_progress(plugin_name):
-            from sandy.progress import QueueProgressReporter
-
-            return QueueProgressReporter(plugin_name, progress_queue, loop)
-
-        async def drain():
-            while True:
-                msg = await progress_queue.get()
-                if msg is None:
-                    break
-                await reply_fn("progress", {"text": msg})
-
-        drain_task = asyncio.create_task(drain())
-        try:
-            results, errors = await daemon.handle_message(
-                "unknown", "tom", progress_factory=make_progress
-            )
-        finally:
-            await progress_queue.put(None)
-            await drain_task
-
-        for plugin_name, response in results:
-            await reply_fn(plugin_name, response)
-        for plugin_name, error_msg in errors:
-            friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
-            await reply_fn("error", {"text": friendly})
-        if not results and not errors:
-            await reply_fn("sandy", {"text": "Sorry, I'm not sure how to do that."})
-
-        assert replies == [("sandy", {"text": "Sorry, I'm not sure how to do that."})]
+        assert replies == [("sandy", {"text": NO_MATCH_MESSAGE})]
 
     asyncio.run(run())
 

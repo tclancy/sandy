@@ -90,6 +90,9 @@ sandy --actor michelle "crossword"
 ```
 
 If no plugin matches the command, Sandy responds: `I don't know how to do that yet.`
+That is the answer on **every** surface — the CLI and the Slack daemon share one
+definition (`sandy.pipeline.NO_MATCH_MESSAGE`), so the reply does not depend on
+where you typed.
 
 ---
 

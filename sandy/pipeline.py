@@ -14,6 +14,19 @@ from sandy.progress import ProgressFn
 
 logger = logging.getLogger(__name__)
 
+# What every delivery boundary says when nothing matched. Defined here, beside
+# the matching it describes, because both boundaries (``cli.main`` and
+# ``daemon._handle_callback``) already import from this module and neither owns
+# the condition. Deliberately not a personality module: the wording is Tom's to
+# pick, and a module named for voice invites agents to add unprompted ones
+# (sandy#184). It is the CLI's long-standing line, which README documents and
+# CLAUDE.md cites as the house example; the daemon is what changes to meet it.
+#
+# "Nothing matched" is interaction-level, not answer-level, so by CLAUDE.md's
+# boundary rule a plugin must never emit this -- Sandy fans out, and a plugin
+# that said it would repeat itself once per non-matching plugin.
+NO_MATCH_MESSAGE = "I don't know how to do that yet."
+
 
 def _default_plugin_dir() -> str:
     return os.path.join(os.path.dirname(__file__), "plugins")
