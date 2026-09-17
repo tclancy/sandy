@@ -153,7 +153,8 @@ def test_callback_no_match_sends_fallback(tmp_path):
     ``handle_message`` and then re-typed the ``if not results and not errors``
     branch, including the literal -- so it asserted against its own copy of the
     production code and stayed green no matter what ``daemon.py`` actually
-    said. Its docstring already claimed it called the callback "directly".
+    said. Its own inline comment already claimed it called the callback
+    "directly".
     """
     plugin_dir = _make_plugins(
         tmp_path,

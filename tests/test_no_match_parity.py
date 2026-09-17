@@ -16,13 +16,33 @@ regardless of what wording someone picks.
 
 import asyncio
 import textwrap
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+import sandy.config as config_module
 from sandy.cli import main
 from sandy.daemon import Daemon
 from sandy.pipeline import NO_MATCH_MESSAGE
 
 UNMATCHED = "something no plugin has ever heard of"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config(monkeypatch):
+    """Keep the real ~/.config/sandy/sandy.toml out of these tests.
+
+    Both helpers drive the production pipeline, which calls ``load_config()``
+    and then ``apply_env()`` -- so without this the developer's actual config is
+    read and its UPPERCASE keys (Slack and Spotify tokens among them) are
+    injected into ``os.environ`` for every test that runs afterwards. It can
+    also turn the run red for an unrelated reason: an ``[actors]`` section that
+    does not resolve "tom" makes the pipeline return an access-denied *result*,
+    so the no-match branch never runs at all.
+    """
+    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [])
+
 
 _ECHO_PLUGIN = {
     "echo.py": """
@@ -91,11 +111,20 @@ def test_both_surfaces_emit_the_shared_constant(tmp_path, capsys):
 
 
 def test_readme_documents_the_string_the_code_actually_emits():
-    """README told users about the CLI wording; it is now true of Slack too."""
-    from pathlib import Path
+    """README told users about the CLI wording; it is now true of Slack too.
 
-    readme = Path(__file__).resolve().parent.parent / "README.md"
-    assert NO_MATCH_MESSAGE in readme.read_text(), (
+    Two assertions, because the first one alone was already green on
+    ``origin/main`` -- README has quoted the CLI's line for as long as it has
+    existed. Only the second is evidence about *this* change, and it is what
+    fails if the "every surface" sentence is dropped while the divergence is
+    quietly reintroduced.
+    """
+    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+    assert NO_MATCH_MESSAGE in readme, (
         f"README.md does not contain {NO_MATCH_MESSAGE!r} -- "
         "the documented no-match reply has drifted from the code"
+    )
+    assert "NO_MATCH_MESSAGE" in readme, (
+        "README.md no longer tells the reader the reply is shared across "
+        "surfaces -- the CLI-only framing that #187 fixed has come back"
     )
