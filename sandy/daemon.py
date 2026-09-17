@@ -11,7 +11,7 @@ from sandy.config import apply_env, find_config_path, load_config
 from sandy.loader import load_plugins
 from sandy import oauth_server
 from sandy.observability import capture, init_sentry, status_message
-from sandy.pipeline import run_pipeline
+from sandy.pipeline import NO_MATCH_MESSAGE, run_pipeline
 from sandy.printer import _DEFAULT_PRINTER, _is_ipp_uri, print_pdf
 from sandy.progress import QueueProgressReporter
 from sandy.transport_loader import load_transports
@@ -178,7 +178,7 @@ class Daemon:
                 friendly = f"{friendly} `{detail}`"
             await reply_fn("error", {"text": friendly})
         if not results and not errors:
-            await reply_fn("sandy", {"text": "Sorry, I'm not sure how to do that."})
+            await reply_fn("sandy", {"text": NO_MATCH_MESSAGE})
 
     async def _handle_pdf_response(self, response: dict) -> dict:
         """Attempt to print a PDF and update the response text to reflect the outcome.

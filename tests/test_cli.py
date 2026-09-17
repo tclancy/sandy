@@ -174,6 +174,10 @@ def test_main_no_match(tmp_path, capsys):
     with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
         exit_code = main(["unknown command"])
     captured = capsys.readouterr()
+    # Deliberately the literal, not sandy.pipeline.NO_MATCH_MESSAGE. This is the
+    # only assertion in the suite that would notice the shared constant being
+    # reworded -- the #187 parity tests import it and so move with it. Tidying
+    # this into the constant would leave the wording unguarded.
     assert "I don't know how to do that yet." in captured.out
     assert exit_code == 1
 
