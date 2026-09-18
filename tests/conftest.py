@@ -6,6 +6,49 @@ import pytest
 import sentry_sdk
 from sentry_sdk.integrations.logging import LoggingIntegration
 
+import sandy.config as config_module
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ambient config files invisible to every test.
+
+    `sandy.config.find_config_path` walks `_SEARCH_PATHS` at call time, and
+    `apply_env` then copies every UPPERCASE key it finds into `os.environ` with
+    `setdefault`. Any test that reaches `load_config()` without pinning a path
+    — a bare `Daemon(...)`, `main()`, or `run_pipeline()` — therefore imports
+    whatever config the machine happens to have, and those values persist for
+    every test that runs afterwards (sandy#200).
+
+    Pinning the list to empty is sufficient and precise: nothing is discovered,
+    nothing is applied, and a test that genuinely exercises discovery overrides
+    it with its own `setattr` on the same function-scoped `monkeypatch` —
+    `tests/test_help_plugin.py` does exactly that and is unaffected.
+
+    The credential exposure is the loud harm, but the quiet one costs more
+    time: ambient config can turn a run red *for the wrong reason*. An
+    `[actors]` section that does not resolve the actor a test passes makes
+    `run_pipeline` return an access-denied **result** rather than an empty one,
+    so a test about the no-match branch never reaches that branch and fails
+    describing something else entirely. That failure appears only on the
+    developer's machine and never in CI, which is the expensive direction.
+
+    Because this fixture is autouse and module-level fixtures shadow conftest
+    ones **by name**, do not re-declare `_isolate_config` in a test module —
+    a local copy silently replaces this one and stops tracking it. Override the
+    behaviour with a plain `monkeypatch.setattr` inside the test instead.
+
+    **The search path that actually fires here is `./sandy.toml`, not
+    `~/.config/sandy/sandy.toml`.** `_SEARCH_PATHS` holds `Path("sandy.toml")`
+    unresolved, so it is relative to the *current working directory* — which
+    for this suite is the repo root, where a real gitignored `sandy.toml` is
+    the documented local-dev location. This matters for anyone trying to
+    reproduce the leak: it does **not** reproduce from a scratch checkout or
+    in CI, because neither has that file. It reproduces in the one place the
+    suite is usually run.
+    """
+    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [])
+
 
 def scrub_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Remove every `GIT_*` variable from the environment via `monkeypatch`.
