@@ -27,6 +27,52 @@ logger = logging.getLogger(__name__)
 # that said it would repeat itself once per non-matching plugin.
 NO_MATCH_MESSAGE = "I don't know how to do that yet."
 
+# How much of a failing plugin's exception text a delivery boundary shows.
+# Shared rather than the daemon's alone: an unbounded exception string is no
+# more welcome in a terminal than on a Slack channel, and a cap on one surface
+# only is how the two forked in the first place (#199).
+PLUGIN_ERROR_DETAIL_LIMIT = 100
+
+_TRUNCATION_MARKER = "..."
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Cut ``text`` to ``limit`` characters, saying so when anything was lost.
+
+    The marker counts against the limit, so the result is never longer than
+    ``limit``. A bare slice is what the daemon did before #199, and it tells
+    the reader a lie -- a cut exception is indistinguishable from a whole one,
+    which matters most on the long messages where the tail is the informative
+    part.
+    """
+    if len(text) <= limit:
+        return text
+    return text[: limit - len(_TRUNCATION_MARKER)] + _TRUNCATION_MARKER
+
+
+def format_plugin_error(plugin_name: str, error_msg: str | None = None) -> str:
+    """What every delivery boundary says when a matched plugin raised.
+
+    Defined here for the same reason as ``NO_MATCH_MESSAGE`` above: beside the
+    condition it describes -- ``run_pipeline`` is what catches the exception and
+    appends the ``(plugin_name, error_message)`` tuple -- and in a module both
+    boundaries already import, rather than in one named for voice (sandy#184).
+
+    The wording is the daemon's; ``CLAUDE.md`` line 81 cites it as the house
+    example of a friendly failure, against ``ERROR: plugin raised RuntimeError``
+    as the anti-example. The CLI's old ``<name> plugin failed: <msg>`` was the
+    nearer of the two to the anti-example, so the CLI is what moved.
+
+    Returns plain text with no transport markup. The daemon used to wrap the
+    detail in backticks, which is Slack mrkdwn baked into a string a terminal
+    also prints; ``sandy.transports.slack.format_response`` owns that job and
+    already prefers a ``code_text`` block over fences in ``text`` (#122).
+    """
+    friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
+    if not error_msg:
+        return friendly
+    return f"{friendly} {_truncate(error_msg, PLUGIN_ERROR_DETAIL_LIMIT)}"
+
 
 def _default_plugin_dir() -> str:
     return os.path.join(os.path.dirname(__file__), "plugins")
