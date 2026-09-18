@@ -27,9 +27,10 @@ from unittest.mock import patch
 import pytest
 
 import sandy.config as config_module
+import sandy.transports.slack as slack
 from sandy.cli import main
 from sandy.daemon import Daemon
-from sandy.pipeline import PLUGIN_ERROR_DETAIL_LIMIT, format_plugin_error
+from sandy.pipeline import PLUGIN_ERROR_DETAIL_LIMIT, _truncate, format_plugin_error
 
 TRIGGER = "break things"
 
@@ -114,15 +115,43 @@ def test_cli_and_daemon_report_the_same_failure_the_same_way(tmp_path, capsys, e
 
 
 @pytest.mark.parametrize("error_msg", ERROR_CASES)
-def test_both_surfaces_emit_the_shared_formatter(tmp_path, capsys, error_msg):
-    """Parity alone is satisfiable by two call sites that happen to agree today.
-
-    This pins that the agreement comes from the single shared definition, so
-    editing one boundary cannot quietly re-fork it while parity still holds.
-    """
+def test_both_surfaces_emit_what_the_shared_formatter_returns(tmp_path, capsys, error_msg):
+    """Each boundary's output equals the shared function's, for every case."""
     expected = format_plugin_error("bad", error_msg)
     assert _cli_error_reply(tmp_path, capsys, error_msg) == expected
     assert _daemon_error_reply(tmp_path, error_msg) == expected
+
+
+@pytest.mark.parametrize("boundary", ["sandy.cli", "sandy.daemon"])
+def test_each_boundary_calls_the_shared_formatter_rather_than_matching_it(
+    tmp_path, capsys, monkeypatch, boundary
+):
+    """Agreeing output does not prove a shared *call*, and that is the regression.
+
+    The test above -- and #187's ``test_both_surfaces_emit_the_shared_constant``,
+    which has the same defect -- derive ``expected`` by calling the very function
+    the boundaries call, so they only re-prove output equality. Measured: replace
+    ``daemon.py``'s call with an inline copy producing byte-identical text and the
+    whole suite stays green. A re-fork is exactly what this file exists to catch,
+    and it survived.
+
+    Patching the name *as each module imported it* is what distinguishes the two.
+    Both do ``from sandy.pipeline import format_plugin_error``, so a boundary that
+    stops routing through that name stops seeing the sentinel.
+    """
+    monkeypatch.setattr(
+        f"{boundary}.format_plugin_error",
+        lambda plugin_name, error_msg=None: f"SENTINEL {plugin_name} {error_msg!r}",
+    )
+    reply = (
+        _cli_error_reply(tmp_path, capsys, "boom")
+        if boundary == "sandy.cli"
+        else _daemon_error_reply(tmp_path, "boom")
+    )
+    assert reply == "SENTINEL bad 'boom'", (
+        f"{boundary} did not route its plugin-error text through the shared "
+        f"sandy.pipeline.format_plugin_error name; it emitted {reply!r}"
+    )
 
 
 def test_the_cap_is_shared_rather_than_the_daemons_alone(tmp_path, capsys):
@@ -155,6 +184,24 @@ def test_the_shared_cap_is_the_daemons_historical_hundred():
     copy decision rather than a refactor.
     """
     assert PLUGIN_ERROR_DETAIL_LIMIT == 100
+
+
+def test_truncate_never_returns_more_than_the_limit_it_was_given():
+    """``_truncate``'s docstring promises a result no longer than ``limit``.
+
+    Unreachable through ``format_plugin_error``, whose only limit is 100 -- but
+    ``limit`` is a parameter, and without this the guard against it is a branch
+    no test enters: a bare ``text[: limit - 3]`` returns a *negative* slice for
+    any limit under 3, so ``_truncate("abcd", 2)`` gives ``"abc..."`` -- six
+    characters from a two-character budget, longer than the input. A mutation
+    round deleting the guard reported SURVIVED before this existed.
+    """
+    for limit in range(len("...") + 2):
+        result = _truncate("abcdefgh", limit)
+        assert len(result) <= limit, (
+            f"_truncate(limit={limit}) returned {result!r}, "
+            f"{len(result)} chars for a {limit}-char budget"
+        )
 
 
 def test_truncation_is_visible_rather_than_silent():
@@ -215,4 +262,27 @@ def test_the_house_wording_is_the_daemons_not_the_clis():
     """
     assert format_plugin_error("spotify") == (
         "I am terribly sorry, spotify just does not want to behave!"
+    )
+
+
+def test_the_daemons_error_payload_renders_as_one_inline_slack_block(tmp_path):
+    """Nothing tested what the error reply actually looks like in Slack.
+
+    The daemon's ``reply_fn("error", ...)`` payload never met
+    ``format_response`` in any test, so #199 could change the rendering on the
+    surface it was meant to improve and no test would say so. Added with the
+    decision to keep error detail in ``text``: ``sandy.plugins.dispatch``'s
+    ``_http_error_message`` already made that call ("errors go into ``text``
+    (not ``code_text``) so Slack renders them inline"), and ``code_text`` would
+    put the raw exception *above* the apology -- ``format_response`` emits the
+    code block first by design.
+    """
+    payload = {"text": format_plugin_error("spotify", "connection refused")}
+    blocks = slack.format_response("error", payload)["blocks"]
+
+    sections = [b for b in blocks if b.get("type") == "section"]
+    assert len(sections) == 1, f"expected one section block, got {blocks}"
+    assert sections[0]["text"]["text"] == payload["text"]
+    assert not [b for b in blocks if b.get("type") == "rich_text"], (
+        "error detail routed to a code block: it would render above the apology"
     )
