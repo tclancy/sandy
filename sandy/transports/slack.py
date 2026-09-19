@@ -172,7 +172,7 @@ def _append(blocks: list, block: dict | None) -> None:
         blocks.append(block)
 
 
-def _header_block(plugin_name: str, response: dict, title) -> dict | None:
+def _header_block(plugin_name: str, response: dict, title: str | None) -> dict | None:
     """A `header`, or None when the title is absent or empty.
 
     Truthiness rather than `"title" in response`: Slack rejects the whole
@@ -200,7 +200,7 @@ def _text_block(plugin_name: str, text: str) -> dict | None:
     return None
 
 
-def _image_block(plugin_name: str, response: dict, title) -> dict | None:
+def _image_block(plugin_name: str, response: dict, title: str | None) -> dict | None:
     """An `image`, or None when `image_url` is absent or empty.
 
     `alt_text` uses `or` rather than a dict default, which cannot fire when the
@@ -245,9 +245,9 @@ def format_response(plugin_name: str, response: dict) -> dict:
     logger.debug("Formatting response for plugin '%s': keys=%s", plugin_name, list(response.keys()))
     blocks = []
 
-    # Truthiness, not `"title" in response`: Slack rejects the whole message
-    # over a zero-length `plain_text`, so a present-but-empty title has to be
-    # dropped rather than rendered (#207). One local, three consumers.
+    # One local, three consumers: the header, the image alt_text, and the
+    # drop-logging in each. Why empty is dropped rather than rendered is in
+    # `_header_block`'s docstring, stated once.
     title = response.get("title")
     _append(blocks, _header_block(plugin_name, response, title))
 
