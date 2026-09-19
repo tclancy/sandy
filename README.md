@@ -212,6 +212,12 @@ def handle(text: str, actor: str, progress=None) -> dict:
     }
 ```
 
+> The loader globs every `*.py` in that directory. A file declaring **none** of
+> `name` / `commands` / `handle` is treated as a helper and skipped in silence —
+> that is how `base.py` stays quiet (#182). A file declaring *some* of them, or
+> subclassing `SandyPlugin` without also exposing the three at module level, is
+> a plugin with a bug and says so on stderr.
+
 **Response dict keys** (all optional):
 
 | Key | Type | Effect |

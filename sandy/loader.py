@@ -1,14 +1,65 @@
 import importlib.metadata
 import importlib.util
+import inspect
 import os
 import sys
 
 from sandy.config import is_active
+from sandy.plugins.base import SandyPlugin
 
 
 REQUIRED_ATTRS = ("name", "commands", "handle")
 
 ENTRY_POINT_GROUP = "sandy.plugins"
+
+
+def _is_concrete_plugin(value) -> bool:
+    """True for a finished `SandyPlugin` subclass or an instance of one.
+
+    Abstract subclasses are excluded on purpose, and `SandyPlugin` itself is the
+    first of them: an ABC with unimplemented members is scaffolding for the next
+    author, which is the thing this module is trying to stop warning about. A
+    subclass that implements every abstract member has finished claiming to be a
+    plugin.
+    """
+    if isinstance(value, SandyPlugin):
+        return True
+    return (
+        isinstance(value, type) and issubclass(value, SandyPlugin) and not inspect.isabstract(value)
+    )
+
+
+def _declares_plugin_surface(module) -> bool:
+    """True if *module* claims to be a Sandy plugin at all.
+
+    Separates "this file was never meant to be a plugin" from "this plugin has
+    a bug", which `_validate_plugin` cannot do on its own: it prints the same
+    warning for `sandy/plugins/base.py` — shared scaffolding for plugin authors,
+    correct as written — as for a plugin whose author forgot `handle` (#182).
+
+    A module carrying *none* of `REQUIRED_ATTRS` is not a broken plugin, it is
+    not a plugin. One that carries some but not all of them is claiming to be
+    one and getting it wrong, which is exactly what the warning is for.
+
+    `REQUIRED_ATTRS` is reused here to answer a different question than
+    `_validate_plugin` asks it — "does this file *claim* to be a plugin" rather
+    than "is this plugin complete". The two are deliberately the same list: a
+    file is claiming exactly as much as it names.
+
+    **The class-based arm is not a nicety.** A file that follows `base.py`'s own
+    instruction — subclass `SandyPlugin`, override `handle` — has no module-level
+    surface at all, and the file loader appends the *module*, so such a file has
+    never actually worked. Without this arm it would go from a wrong warning to
+    no warning, which is worse: the author following the documented shape is
+    exactly the person who needs to be told.
+
+    Deliberately not used on the entry-point path: registering under
+    `ENTRY_POINT_GROUP` is itself a declaration of intent, so a zero-surface
+    entry point is broken and should say so.
+    """
+    if any(hasattr(module, attr) for attr in REQUIRED_ATTRS):
+        return True
+    return any(_is_concrete_plugin(value) for value in vars(module).values())
 
 
 def _validate_plugin(module, label: str) -> bool:
@@ -53,6 +104,11 @@ def _load_file_plugins(plugin_dir: str, config: dict) -> list:
             spec.loader.exec_module(module)
         except Exception as e:
             print(f"Warning: failed to load {filename}: {e}", file=sys.stderr)
+            continue
+
+        # Scaffolding and helpers living beside the plugins are skipped in
+        # silence; only a file that claims to be a plugin can be a broken one.
+        if not _declares_plugin_surface(module):
             continue
 
         if not _validate_plugin(module, filename):
