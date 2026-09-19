@@ -180,19 +180,26 @@ def test_the_ast_walk_reports_every_form_it_cannot_enumerate(tmp_path):
     A control that writes only *one* blind shape is not enough either: with a
     single computed subscript in the decoy, the whole computed-`.get` branch
     could be deleted and both tests stayed green.
+
+    Order-independent on purpose: `ast.walk` yields "in no specified order" by
+    documentation, the five accesses here only line up with source order because
+    they sit at the same depth, and nothing downstream consumes the sequence —
+    `AMBIENT_ENV_KEYS` is a set.
     """
     package = _write(tmp_path, _EVERY_BLIND_FORM)
 
     offenders = conftest.env_reads_without_a_literal_key(package)
 
     assert len(offenders) == 5, offenders
-    assert [o.split()[-1] for o in offenders] == [
-        "(subscript)",
-        "(environ.get)",
-        "(getenv)",
-        "(membership)",
-        "(environ.somethingnobodysupports)",
-    ]
+    assert sorted(o.split()[-1] for o in offenders) == sorted(
+        [
+            "(subscript)",
+            "(environ.get)",
+            "(getenv)",
+            "(membership)",
+            "(environ.somethingnobodysupports)",
+        ]
+    )
 
 
 def test_the_config_walk_reads_globals_and_one_level_of_section(tmp_path):

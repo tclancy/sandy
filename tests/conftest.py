@@ -158,6 +158,11 @@ def env_reads_without_a_literal_key(package_dir: Path) -> list[str]:
                 ENVIRON_KEY_METHODS | ENVIRON_KEYLESS_METHODS
             )
             computed = key is None and method not in ENVIRON_KEYLESS_METHODS
+            # The second clause reads redundant against today's constant and is
+            # not: it is what makes narrowing `ENVIRON_KEY_METHODS` a *failure*
+            # rather than a silent no-op. Drop `setdefault` from the allow-list
+            # and the key stops being derived, so the site must start being
+            # reported — without this, that mutation survives the whole suite.
             if computed and method == "setdefault" and method in ENVIRON_KEY_METHODS:
                 continue
             if unsupported or computed:
