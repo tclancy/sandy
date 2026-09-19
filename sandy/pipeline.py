@@ -1,4 +1,10 @@
-"""Core pipeline: match text against plugins, run handlers, collect results."""
+"""Core pipeline: match text against plugins, run handlers, collect results.
+
+Also home to the two strings every delivery boundary says about a
+pipeline-level outcome -- nothing matched, and a matched plugin raised.
+They live beside the conditions they describe; see ``format_plugin_error``
+for when that should become a module of its own.
+"""
 
 import inspect
 import logging
@@ -26,6 +32,75 @@ logger = logging.getLogger(__name__)
 # boundary rule a plugin must never emit this -- Sandy fans out, and a plugin
 # that said it would repeat itself once per non-matching plugin.
 NO_MATCH_MESSAGE = "I don't know how to do that yet."
+
+# How much of a failing plugin's exception text a delivery boundary shows.
+# Shared rather than the daemon's alone: an unbounded exception string is no
+# more welcome in a terminal than on a Slack channel, and a cap on one surface
+# only is how the two forked in the first place (#199).
+PLUGIN_ERROR_DETAIL_LIMIT = 100
+
+_TRUNCATION_MARKER = "..."
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Cut ``text`` to ``limit`` characters, saying so when anything was lost.
+
+    The marker counts against the limit, so the result is never longer than
+    ``limit``. A bare slice is what the daemon did before #199, and it tells
+    the reader a lie -- a cut exception is indistinguishable from a whole one,
+    which matters most on the long messages where the tail is the informative
+    part.
+
+    A *limit* no larger than the marker has no room to say anything was lost,
+    so it degrades to a plain cut rather than returning something longer than
+    the limit it was given -- which a bare negative slice index would do.
+    """
+    if len(text) <= limit:
+        return text
+    if limit <= len(_TRUNCATION_MARKER):
+        return text[:limit]
+    return text[: limit - len(_TRUNCATION_MARKER)] + _TRUNCATION_MARKER
+
+
+def format_plugin_error(plugin_name: str, error_msg: str | None = None) -> str:
+    """What every delivery boundary says when a matched plugin raised.
+
+    Lives here rather than in a new ``sandy/messages.py`` (sandy#199 proposed
+    one) for two reasons that outlive the taste argument: it sits beside the
+    code that *produces* the condition -- ``run_pipeline``'s ``except`` clause
+    is what appends the ``(plugin_name, error_message)`` tuple -- and both
+    boundaries already import this module, so a new one buys an import edge and
+    no behaviour. It is also not purely copy: the cap and the truncation policy
+    are pipeline-adjacent decisions, not wording.
+
+    Move both this and ``NO_MATCH_MESSAGE`` to ``sandy/messages.py`` when a
+    third shared boundary string appears, or when something that is not the
+    pipeline (the printer, a transport) needs one. Until then the split costs
+    more than it buys, and it stays a pure rename whenever it is wanted.
+
+    The wording is the daemon's; ``CLAUDE.md`` line 81 cites it as the house
+    example of a friendly failure, against ``ERROR: plugin raised RuntimeError``
+    as the anti-example. The CLI's old ``<name> plugin failed: <msg>`` was the
+    nearer of the two to the anti-example, so the CLI is what moved.
+
+    Returns plain text with no transport markup. The daemon used to wrap the
+    detail in backticks, which is Slack mrkdwn baked into a string a terminal
+    also prints.
+
+    Routing the detail to the Slack transport's ``code_text`` block instead was
+    considered and rejected, on two measurements. ``sandy.plugins.dispatch``
+    already decided this question the other way in ``_http_error_message``:
+    "errors go into ``text`` (not ``code_text``) so Slack renders them inline".
+    And ``format_response`` emits ``code_text`` *before* ``text`` -- pinned
+    deliberately by ``test_format_response_code_text_alongside_text`` as "code
+    first, then commentary", which is the right order for output-plus-note and
+    the wrong one for apology-plus-raw-error: the exception would render above
+    the sentence apologising for it.
+    """
+    friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
+    if not error_msg:
+        return friendly
+    return f"{friendly} {_truncate(error_msg, PLUGIN_ERROR_DETAIL_LIMIT)}"
 
 
 def _default_plugin_dir() -> str:

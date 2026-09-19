@@ -7,6 +7,10 @@ __pycache__/
 *.egg-info/
 .coverage
 
+# Agent mutation harnesses and one-off probes (metaframework/templates/mutation-harness.py
+# tells agents this path is gitignored; in this repo alone of the fleet it was not).
+.scratch/
+
 # Override global gitignore — uv.lock is needed for Docker build (uv sync --frozen)
 !uv.lock
 .envrc

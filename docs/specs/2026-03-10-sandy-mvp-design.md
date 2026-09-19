@@ -56,7 +56,7 @@ When only one plugin matches, the header is still shown for consistency.
 
 ### Error Handling
 
-Each matched plugin's `handle()` is called independently. If a plugin raises an exception, the CLI prints a friendly error to stderr (e.g. `"spotify plugin failed: <error>"`) and continues to the remaining plugins. The CLI exits with non-zero status only if **all** matched plugins failed, or if no plugins matched. Partial success (some plugins worked, some failed) exits with status 0 and reports failures to stderr.
+Each matched plugin's `handle()` is called independently. If a plugin raises an exception, the CLI prints a friendly error to stderr (superseded by #199: the wording is now `"I am terribly sorry, spotify just does not want to behave!"` plus up to 100 characters of detail, shared with the daemon as `sandy.pipeline.format_plugin_error`) and continues to the remaining plugins. The CLI exits with non-zero status only if **all** matched plugins failed, or if no plugins matched. Partial success (some plugins worked, some failed) exits with status 0 and reports failures to stderr.
 
 ## First Plugin: Spotify
 

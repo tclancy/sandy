@@ -6,7 +6,7 @@ import tempfile
 
 import requests
 
-from sandy.pipeline import NO_MATCH_MESSAGE, run_pipeline
+from sandy.pipeline import NO_MATCH_MESSAGE, format_plugin_error, run_pipeline
 from sandy.printer import print_pdf
 from sandy.progress import make_reporter
 
@@ -108,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     for plugin_name, error_msg in errors:
-        print(f"{plugin_name} plugin failed: {error_msg}", file=sys.stderr)
+        print(format_plugin_error(plugin_name, error_msg), file=sys.stderr)
 
     if not results and not errors:
         print(NO_MATCH_MESSAGE)

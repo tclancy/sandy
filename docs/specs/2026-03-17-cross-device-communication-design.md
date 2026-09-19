@@ -152,7 +152,7 @@ SLACK_BOT_TOKEN = "${SLACK_BOT_TOKEN}"
 Same philosophy as today — partial failure is OK.
 
 - **Transport fails to connect** (e.g., bad Slack token): log error, continue running other transports. If all transports fail, daemon exits non-zero.
-- **Content plugin raises during `handle()`:** Same as today — report to logs, return error to the user through the transport ("spotify plugin failed"), continue with other matches.
+- **Content plugin raises during `handle()`:** Same as today — report to logs, return error to the user through the transport (superseded by #199: both surfaces now say `"I am terribly sorry, spotify just does not want to behave!"` from one definition), continue with other matches.
 - **Transport loses connection** (Slack WebSocket drops): reconnect automatically. `slack-bolt` handles this natively with Socket Mode.
 - **Malformed transport plugin:** Skip with warning, same as content plugins.
 
