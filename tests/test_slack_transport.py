@@ -384,3 +384,19 @@ def test_sports_bold_survives_the_transport_end_to_end():
     # which Slack decodes back to `&` on render.
     assert text.startswith("*Today's Results &amp; Live Scores:*\n")
     assert text.count("*") == response["text"].count("*")
+
+
+def test_format_response_omits_the_links_block_when_nothing_fits():
+    """A single over-cap link must drop the block, not emit an empty one.
+
+    Slack's Block Kit rejects a `text` object of zero length outright, so
+    returning "" here would turn a risk of an over-length rejection into a
+    guaranteed one — strictly worse than the uncapped code it replaced.
+    """
+    result = format_response(
+        "spotify", {"text": "ok", "links": [{"label": "L" * 4000, "url": "https://example.com"}]}
+    )
+    assert not any("example.com" in b.get("text", {}).get("text", "") for b in result["blocks"])
+    assert all(b["text"]["text"] for b in result["blocks"] if b["type"] == "section"), (
+        "no section may carry empty text"
+    )

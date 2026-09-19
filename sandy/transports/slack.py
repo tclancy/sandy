@@ -117,6 +117,9 @@ def _join_within_cap(lines: list[str], cap: int) -> str:
     Whole lines rather than a character truncation: each line here is a
     complete `<url|label>` sequence, and a cut inside one leaves a dangling
     `<` that swallows the rest of the message.
+
+    Returns ``""`` when even the first line exceeds *cap* on its own; the
+    caller must then omit the block rather than emit an empty one.
     """
     kept: list[str] = []
     used = 0
@@ -206,12 +209,17 @@ def format_response(plugin_name: str, response: dict) -> dict:
         link_lines = [
             f"<{link['url']}|{escape_mrkdwn(link['label'])}>" for link in response["links"]
         ]
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": _join_within_cap(link_lines, _TEXT_CAP)},
-            }
-        )
+        # Empty when even the first line is over the cap on its own. Slack
+        # rejects a zero-length text object, so emitting the block anyway would
+        # turn a *risk* of an over-length rejection into a certain one.
+        link_text = _join_within_cap(link_lines, _TEXT_CAP)
+        if link_text:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": link_text},
+                }
+            )
 
     if "image_url" in response:
         blocks.append(
