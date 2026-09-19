@@ -90,6 +90,11 @@ def escape_mrkdwn(text: str) -> str:
     The half this *does* fix is the half with a failure mode worse than
     cosmetic: an exception or upstream API string containing `<@U12345>`
     otherwise reaches Slack as a real mention.
+
+    Not idempotent, deliberately: text that already contains `&amp;` becomes
+    `&amp;amp;` and renders as the literal `&amp;`. No producer does that today
+    — every one of them interpolates raw API data — but a future plugin
+    scraping HTML would need to unescape before returning.
     """
     for char, entity in _MRKDWN_CONTROL_ESCAPES:
         text = text.replace(char, entity)
@@ -104,6 +109,24 @@ def _escaped_mrkdwn(text: str, cap: int) -> str:
     and get the whole message rejected.
     """
     return _PARTIAL_ENTITY_RE.sub("", escape_mrkdwn(text)[:cap])
+
+
+def _join_within_cap(lines: list[str], cap: int) -> str:
+    """Newline-join as many whole *lines* as fit in *cap* characters.
+
+    Whole lines rather than a character truncation: each line here is a
+    complete `<url|label>` sequence, and a cut inside one leaves a dangling
+    `<` that swallows the rest of the message.
+    """
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        extra = len(line) + (1 if kept else 0)
+        if used + extra > cap:
+            break
+        kept.append(line)
+        used += extra
+    return "\n".join(kept)
 
 
 def _rich_text_preformatted_block(text: str) -> dict:
@@ -175,16 +198,18 @@ def format_response(plugin_name: str, response: dict) -> dict:
         )
 
     if response.get("links"):
-        # The label and URL both carry upstream data (Spotify album names, for
-        # one), and an unescaped `>` in either ends the link sequence early.
+        # Labels carry upstream data (Spotify album names, for one) and an
+        # unescaped `>` in one ends the link sequence early. The URL half is
+        # left alone on purpose: `&` there is a query separator, escaping it
+        # would rewrite every OAuth URL Sandy hands out, and `<`/`>` cannot
+        # legally appear unescaped in a URI to begin with.
         link_lines = [
-            f"<{escape_mrkdwn(link['url'])}|{escape_mrkdwn(link['label'])}>"
-            for link in response["links"]
+            f"<{link['url']}|{escape_mrkdwn(link['label'])}>" for link in response["links"]
         ]
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "\n".join(link_lines)},
+                "text": {"type": "mrkdwn", "text": _join_within_cap(link_lines, _TEXT_CAP)},
             }
         )
 

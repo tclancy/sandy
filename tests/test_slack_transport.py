@@ -155,11 +155,13 @@ def test_format_response_legacy_fenced_text_auto_promoted():
 
     This is the backward-compat path that fixes #122 even for plugins not yet updated.
     """
-    legacy = "```\nfoo bar\nbaz\n```"
+    legacy = "```\nfoo <bar>\nbaz\n```"
     result = format_response("legacy", {"title": "Old plugin", "text": legacy})
     blocks = result["blocks"]
     code_blocks = _rich_text_blocks(blocks)
-    assert code_blocks == ["foo bar\nbaz"]
+    # Promoted to rich_text_preformatted, which is literal — so NOT escaped,
+    # even though the same bytes arriving as an unpromoted `text` would be.
+    assert code_blocks == ["foo <bar>\nbaz"]
     # No raw mrkdwn section with literal backticks left behind.
     sections = [b for b in blocks if b.get("type") == "section"]
     assert not any("```" in b["text"]["text"] for b in sections)
@@ -291,13 +293,42 @@ def test_format_response_does_not_escape_code_text():
 
 
 def test_format_response_escapes_link_labels():
-    """A `|` or `>` in an upstream label must not break the link syntax."""
+    """A `>` in an upstream label must not end the link sequence early.
+
+    `|` is deliberately not escaped: Slack splits on the *first* pipe, so a
+    later one is ordinary label text.
+    """
     result = format_response(
         "spotify",
         {"links": [{"label": "A|B <redacted>", "url": "https://example.com/?a=1&b=2"}]},
     )
     text = _section_text(result, "example.com")
-    assert text == "<https://example.com/?a=1&amp;b=2|A|B &lt;redacted&gt;>"
+    assert text == "<https://example.com/?a=1&b=2|A|B &lt;redacted&gt;>"
+
+
+def test_format_response_leaves_link_urls_alone():
+    """The URL half is not escaped — `&` there is a query separator, not markup.
+
+    Escaping it would rewrite every OAuth URL Sandy hands out (the Spotify
+    `music login` link carries `scope`, `state` and `redirect_uri`), and buys
+    nothing: `<` and `>` cannot legally appear unescaped in a URI anyway.
+    """
+    url = "https://accounts.spotify.com/authorize?scope=a&state=b&redirect_uri=c"
+    result = format_response("music_discovery", {"links": [{"label": "Log in", "url": url}]})
+    assert _section_text(result, "accounts.spotify") == f"<{url}|Log in>"
+
+
+def test_format_response_drops_whole_link_lines_over_the_cap():
+    """The links section is capped too — and by whole lines, not mid-sequence.
+
+    A section over 3000 characters gets the entire message rejected by Slack.
+    Cutting mid-`<url|label>` would instead leave a dangling `<`.
+    """
+    links = [{"label": "L" * 100, "url": "https://example.com/" + "u" * 100} for _ in range(40)]
+    text = _section_text(format_response("spotify", {"links": links}), "example.com")
+    assert len(text) <= 3000
+    assert text.endswith(">")
+    assert all(line.startswith("<") and line.endswith(">") for line in text.split("\n"))
 
 
 def test_format_response_truncates_after_escaping():
@@ -318,6 +349,21 @@ def test_format_response_never_emits_a_half_written_entity():
     result = format_response("test", {"text": "x" * 2998 + "&"})
     text = _section_text(result, "x")
     assert text == "x" * 2998
+
+
+def test_dispatch_placeholder_syntax_is_escaped_end_to_end():
+    """The other half of #204's split, on the producers it actually changes.
+
+    Four plugins write `<placeholder>` into `text` — `dispatch` (twice),
+    `cast_to_tv` and `music_discovery`. None is a Slack control sequence, so
+    Slack renders them literally today; after this change they arrive as
+    entities and Slack decodes them back. This is the test that goes red if
+    anyone narrows the escape to "only real control sequences".
+    """
+    from sandy.plugins.dispatch import _SHIFT_HELP
+
+    text = _section_text(format_response("dispatch", {"text": _SHIFT_HELP}), "dispatch shift")
+    assert text.startswith("`dispatch shift &lt;kind&gt;` runs a Dispatch shift on the Mac.")
 
 
 def test_sports_bold_survives_the_transport_end_to_end():
