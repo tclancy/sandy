@@ -19,29 +19,11 @@ import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-import sandy.config as config_module
 from sandy.cli import main
 from sandy.daemon import Daemon
 from sandy.pipeline import NO_MATCH_MESSAGE
 
 UNMATCHED = "something no plugin has ever heard of"
-
-
-@pytest.fixture(autouse=True)
-def _isolate_config(monkeypatch):
-    """Keep the real ~/.config/sandy/sandy.toml out of these tests.
-
-    Both helpers drive the production pipeline, which calls ``load_config()``
-    and then ``apply_env()`` -- so without this the developer's actual config is
-    read and its UPPERCASE keys (Slack and Spotify tokens among them) are
-    injected into ``os.environ`` for every test that runs afterwards. It can
-    also turn the run red for an unrelated reason: an ``[actors]`` section that
-    does not resolve "tom" makes the pipeline return an access-denied *result*,
-    so the no-match branch never runs at all.
-    """
-    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [])
 
 
 _ECHO_PLUGIN = {
@@ -101,13 +83,36 @@ def test_cli_and_daemon_give_the_same_answer_to_the_same_no_match(tmp_path, caps
 
 
 def test_both_surfaces_emit_the_shared_constant(tmp_path, capsys):
-    """Parity alone is satisfiable by two literals that happen to agree today.
-
-    This pins that the agreement comes from the single shared definition, so
-    editing one call site cannot quietly re-fork it while parity still holds.
-    """
+    """Each boundary's reply equals the shared constant's value."""
     assert _cli_no_match_reply(tmp_path, capsys) == NO_MATCH_MESSAGE
     assert _daemon_no_match_reply(tmp_path) == NO_MATCH_MESSAGE
+
+
+@pytest.mark.parametrize("boundary", ["sandy.cli", "sandy.daemon"])
+def test_each_boundary_reads_the_shared_constant_rather_than_matching_it(
+    tmp_path, capsys, monkeypatch, boundary
+):
+    """Equal values do not prove a shared *read*, and the re-fork is the regression.
+
+    The test above compares each surface against ``NO_MATCH_MESSAGE``, so a call
+    site that went back to its own literal spelled the same way passes it. That
+    is precisely the state #187 fixed, and nothing here could detect its return.
+    Added with #199, whose parity file had inherited the identical overclaim.
+
+    Both boundaries do ``from sandy.pipeline import NO_MATCH_MESSAGE``, so
+    patching the name as each module imported it is what tells "reads the shared
+    definition" apart from "happens to agree with it".
+    """
+    monkeypatch.setattr(f"{boundary}.NO_MATCH_MESSAGE", "SENTINEL no-match reply")
+    reply = (
+        _cli_no_match_reply(tmp_path, capsys)
+        if boundary == "sandy.cli"
+        else _daemon_no_match_reply(tmp_path)
+    )
+    assert reply == "SENTINEL no-match reply", (
+        f"{boundary} did not read sandy.pipeline.NO_MATCH_MESSAGE for its "
+        f"no-match reply; it emitted {reply!r}"
+    )
 
 
 def test_readme_documents_the_string_the_code_actually_emits():

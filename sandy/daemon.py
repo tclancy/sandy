@@ -11,7 +11,7 @@ from sandy.config import apply_env, find_config_path, load_config
 from sandy.loader import load_plugins
 from sandy import oauth_server
 from sandy.observability import capture, init_sentry, status_message
-from sandy.pipeline import NO_MATCH_MESSAGE, run_pipeline
+from sandy.pipeline import NO_MATCH_MESSAGE, format_plugin_error, run_pipeline
 from sandy.printer import _DEFAULT_PRINTER, _is_ipp_uri, print_pdf
 from sandy.progress import QueueProgressReporter
 from sandy.transport_loader import load_transports
@@ -172,11 +172,7 @@ class Daemon:
             await reply_fn(plugin_name, response)
         for plugin_name, error_msg in errors:
             logger.debug("Dispatching error reply for '%s': %s", plugin_name, error_msg)
-            friendly = f"I am terribly sorry, {plugin_name} just does not want to behave!"
-            if error_msg:
-                detail = error_msg[:100]
-                friendly = f"{friendly} `{detail}`"
-            await reply_fn("error", {"text": friendly})
+            await reply_fn("error", {"text": format_plugin_error(plugin_name, error_msg)})
         if not results and not errors:
             await reply_fn("sandy", {"text": NO_MATCH_MESSAGE})
 

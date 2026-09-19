@@ -224,7 +224,7 @@ def test_main_partial_failure(tmp_path, capsys):
     with patch("sandy.pipeline._default_plugin_dir", return_value=plugin_dir):
         exit_code = main(["test"])
     captured = capsys.readouterr()
-    assert "alpha plugin failed" in captured.err
+    assert "alpha just does not want to behave" in captured.err
     assert "kaboom" in captured.err
     assert "[beta]" in captured.out
     assert "beta worked" in captured.out
@@ -247,7 +247,7 @@ def test_main_all_matched_plugins_fail(tmp_path, capsys):
     with patch("sandy.pipeline._default_plugin_dir", return_value=str(tmp_path)):
         exit_code = main(["boom"])
     captured = capsys.readouterr()
-    assert "boom plugin failed" in captured.err
+    assert "boom just does not want to behave" in captured.err
     assert exit_code == 1
 
 

@@ -94,6 +94,13 @@ That is the answer on **every** surface — the CLI and the Slack daemon share o
 definition (`sandy.pipeline.NO_MATCH_MESSAGE`), so the reply does not depend on
 where you typed.
 
+If a plugin *matches* but then raises, Sandy says `I am terribly sorry, <plugin>
+just does not want to behave!` followed by up to 100 characters of the error,
+ending in `...` when there was more. That is also the answer on **every**
+surface, from one definition (`sandy.pipeline.format_plugin_error`). The CLI
+writes it to stderr and keeps going: other matched plugins still answer, and the
+exit status is non-zero only if *every* matched plugin failed.
+
 ---
 
 ## Running as a Slack Bot

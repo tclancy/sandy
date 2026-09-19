@@ -1,6 +1,5 @@
 import asyncio
 import os
-import re
 import textwrap
 import threading
 import time
@@ -9,7 +8,11 @@ from unittest.mock import patch
 import pytest
 
 from sandy.daemon import Daemon, _missing_required_plugins, _plugin_snapshot
-from sandy.pipeline import NO_MATCH_MESSAGE
+from sandy.pipeline import (
+    NO_MATCH_MESSAGE,
+    PLUGIN_ERROR_DETAIL_LIMIT,
+    format_plugin_error,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +187,12 @@ def test_callback_no_match_sends_fallback(tmp_path):
 
 
 def test_callback_plugin_error_includes_detail(tmp_path):
-    """Daemon callback appends truncated error detail (in backticks) to the friendly message."""
+    """Daemon callback appends the (truncated) error detail to the friendly message.
+
+    The detail used to arrive backtick-wrapped. Those backticks were Slack
+    mrkdwn baked into a string ``cli.main`` also prints, and they left with
+    #199 -- ``sandy.transports.slack.format_response`` owns markup.
+    """
     plugin_dir = _make_plugins(
         tmp_path,
         "plugins",
@@ -212,7 +220,8 @@ def test_callback_plugin_error_includes_detail(tmp_path):
         assert name == "error"
         assert "bad" in resp["text"]
         assert "does not want to behave" in resp["text"]
-        assert "`Something went wrong: API key missing`" in resp["text"]
+        assert "Something went wrong: API key missing" in resp["text"]
+        assert "`" not in resp["text"], "Slack markup leaked back into the shared string"
 
     asyncio.run(run())
 
@@ -244,16 +253,23 @@ def test_callback_plugin_error_truncates_long_message(tmp_path):
 
         assert len(replies) == 1
         _, resp = replies[0]
-        # backtick-wrapped detail should be at most 100 chars + backticks
-        match = re.search(r"`([^`]+)`", resp["text"])
-        assert match is not None
-        assert len(match.group(1)) == 100
+        # The detail is whatever follows the shared headline, and the cap now
+        # lives in pipeline.PLUGIN_ERROR_DETAIL_LIMIT rather than in daemon.py.
+        detail = resp["text"][len(format_plugin_error("bad")) :].strip()
+        assert len(detail) == PLUGIN_ERROR_DETAIL_LIMIT
+        assert detail.endswith("..."), "a silent slice looks like the whole exception"
 
     asyncio.run(run())
 
 
-def test_callback_plugin_error_no_message_omits_backticks(tmp_path):
-    """Daemon callback omits backtick detail when exception has no message."""
+def test_callback_plugin_error_no_message_omits_detail(tmp_path):
+    """Daemon callback emits the headline alone when the exception has no message.
+
+    Renamed from ``..._omits_backticks`` with #199, which removed backticks from
+    every branch -- so the old ``"`" not in text`` assertion had become true by
+    construction and could no longer fail. It asserts the headline is emitted
+    *exactly*, which is the thing the no-message branch actually decides.
+    """
     plugin_dir = _make_plugins(
         tmp_path,
         "plugins",
@@ -278,8 +294,7 @@ def test_callback_plugin_error_no_message_omits_backticks(tmp_path):
 
         assert len(replies) == 1
         _, resp = replies[0]
-        assert "does not want to behave" in resp["text"]
-        assert "`" not in resp["text"]
+        assert resp["text"] == format_plugin_error("bad")
 
     asyncio.run(run())
 
