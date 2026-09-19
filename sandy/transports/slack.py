@@ -59,6 +59,52 @@ _FENCED_RE = re.compile(r"(?s)\A```\n(.*)\n```\Z")
 # under Slack's overall block-payload limits and avoid an API-rejection failure mode.
 _CODE_TEXT_CAP = 12000
 
+# Slack rejects a section block whose text exceeds 3000 characters.
+_TEXT_CAP = 3000
+
+
+# Slack treats `&`, `<` and `>` as control characters in every mrkdwn field:
+# `<...>` is how mentions, channel references and hyperlinks are encoded, and `&`
+# opens an HTML entity. Those three are also the only characters Slack documents
+# an escape for — there is no documented escape for `*`, `_` or backtick.
+#
+# Order matters and is load-bearing: `&` must be replaced first, or the `&` that
+# `&lt;` introduces gets escaped a second time into `&amp;lt;`.
+_MRKDWN_CONTROL_ESCAPES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
+
+# A truncation that lands inside `&amp;` would ship `&am` to Slack, which renders
+# as literal `&am`. Every `&` in an escaped payload belongs to an entity, so a
+# trailing `&` followed only by letters is always a fragment and never content.
+_PARTIAL_ENTITY_RE = re.compile(r"&[a-z]*\Z")
+
+
+def escape_mrkdwn(text: str) -> str:
+    """Neutralise Slack's control characters in plugin-supplied *text*.
+
+    Escapes `&`, `<` and `>` and nothing else. `*`, `_` and backtick are left
+    alone deliberately: three plugins — ``help``, ``sports`` and
+    ``printer_status`` — emit `*bold*` and `` `code` `` in ``text`` on purpose,
+    so a blanket escape would be a visible regression for them, and Slack
+    publishes no escape for those characters anyway (#204).
+
+    The half this *does* fix is the half with a failure mode worse than
+    cosmetic: an exception or upstream API string containing `<@U12345>`
+    otherwise reaches Slack as a real mention.
+    """
+    for char, entity in _MRKDWN_CONTROL_ESCAPES:
+        text = text.replace(char, entity)
+    return text
+
+
+def _escaped_mrkdwn(text: str, cap: int) -> str:
+    """Escape *text* for mrkdwn, then truncate to *cap* without splitting an entity.
+
+    Escaping first and capping second is the only safe order. Capping the raw
+    text first would let escaping push the payload back over Slack's hard limit
+    and get the whole message rejected.
+    """
+    return _PARTIAL_ENTITY_RE.sub("", escape_mrkdwn(text)[:cap])
+
 
 def _rich_text_preformatted_block(text: str) -> dict:
     """Render *text* as a Slack rich_text_preformatted block (Slack's first-class code block)."""
@@ -87,6 +133,14 @@ def format_response(plugin_name: str, response: dict) -> dict:
     Legacy plugins that pre-wrap ``text`` in triple-backtick fences are
     auto-promoted to a ``rich_text_preformatted`` block so the fix lands
     before every plugin is updated.
+
+    **``text`` is a mrkdwn field, and only half of it is escaped for you.**
+    ``&``, ``<`` and ``>`` are escaped here (see :func:`escape_mrkdwn`), so a
+    plugin cannot accidentally emit a mention or a hyperlink. ``*``, ``_`` and
+    backtick are *not*: they are the formatting vocabulary ``help``, ``sports``
+    and ``printer_status`` already write on purpose, so a plugin interpolating
+    untrusted text into ``text`` owns that half itself — wrap it in
+    ``code_text`` if it must survive verbatim (#204).
     """
     logger.debug("Formatting response for plugin '%s': keys=%s", plugin_name, list(response.keys()))
     blocks = []
@@ -116,12 +170,17 @@ def format_response(plugin_name: str, response: dict) -> dict:
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": text[:3000]},
+                "text": {"type": "mrkdwn", "text": _escaped_mrkdwn(text, _TEXT_CAP)},
             }
         )
 
     if response.get("links"):
-        link_lines = [f"<{link['url']}|{link['label']}>" for link in response["links"]]
+        # The label and URL both carry upstream data (Spotify album names, for
+        # one), and an unescaped `>` in either ends the link sequence early.
+        link_lines = [
+            f"<{escape_mrkdwn(link['url'])}|{escape_mrkdwn(link['label'])}>"
+            for link in response["links"]
+        ]
         blocks.append(
             {
                 "type": "section",
