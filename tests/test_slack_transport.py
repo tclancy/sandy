@@ -1,5 +1,8 @@
 """Tests for Slack transport plugin."""
 
+import logging
+
+import sandy.transports.slack as slack
 from sandy.transports.slack import escape_mrkdwn, format_response, inbound_lag_seconds
 
 
@@ -451,20 +454,61 @@ def test_empty_title_does_not_become_an_empty_image_alt_text():
     assert image["alt_text"] == "p"
 
 
-def test_text_that_escapes_to_empty_emits_no_section_block():
-    """The guard reads the ESCAPED body, not the raw input."""
-    blocks = format_response("p", {"text": ""})["blocks"]
-    assert all(b.get("text", {}).get("text") != "" for b in blocks)
+def test_text_that_escapes_to_empty_emits_no_section_block(monkeypatch):
+    """The guard reads the ESCAPED body, not the raw input.
+
+    A non-empty input can still yield a zero-length field: `&` escapes to
+    `&amp;`, the cap cuts it mid-entity, and the partial-entity trim removes
+    the remainder. Unreachable at the real 3000-char cap -- every escape
+    carries a `;` within four characters, so a whole escaped payload can never
+    match `&[a-z]*\\Z`. The cap is lowered here so the case EXISTS at all: a
+    guard written against the RAW input passes every test that only ever feeds
+    it `""`, which is what the first version of this test did.
+    """
+    monkeypatch.setattr(slack, "_TEXT_CAP", 3)
+    assert slack._escaped_mrkdwn("&", 3) == ""  # the fixture really is reachable
+    blocks = format_response("p", {"text": "&"})["blocks"]
+    assert not [b for b in blocks if b["type"] == "section"]
+
+
+def test_empty_image_url_emits_no_image_block():
+    """An empty `image_url` is the fourth zero-length-rejection site."""
+    blocks = format_response("p", {"image_url": ""})["blocks"]
+    assert not [b for b in blocks if b["type"] == "image"]
+
+
+def test_alt_text_is_capped_to_slacks_own_limit():
+    """`alt_text` has its own 2000 limit; the header's 150 does not cover it."""
+    response = {"title": "x" * 2500, "image_url": "https://x/y.png"}
+    blocks = format_response("p", response)["blocks"]
+    assert len(next(b for b in blocks if b["type"] == "image")["alt_text"]) == 2000
+
+
+def test_every_dropped_block_is_logged(caplog):
+    """A drop removes user-facing content, so it must not be silent.
+
+    The links path already established this rule; the three guards added for
+    #207 follow it rather than inventing a second convention.
+    """
+    with caplog.at_level(logging.WARNING, logger="sandy.transports.slack"):
+        format_response("p", {"title": "", "text": "", "image_url": ""})
+    assert sorted(r.message.split()[1] for r in caplog.records if "Dropping" in r.message) == [
+        "image",
+        "text",
+        "title",
+    ]
 
 
 def test_an_entirely_empty_response_still_renders_a_valid_message():
     """Dropping every block must not produce an empty `blocks` array.
 
     Slack rejects `blocks: []` too, so the guards above are only safe because
-    the `via *plugin*` context block is unconditional. Pin that.
+    the `via *plugin*` context block is unconditional. Asserted on block TYPES
+    rather than the copy: `test_format_response_always_has_context` already
+    owns the wording, and pinning it twice sends one copy change red twice.
     """
     blocks = format_response("p", {"title": "", "text": ""})["blocks"]
-    assert blocks == [{"type": "context", "elements": [{"type": "mrkdwn", "text": "via *p*"}]}]
+    assert [b["type"] for b in blocks] == ["context"]
 
 
 def test_non_empty_title_and_text_still_render():

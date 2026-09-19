@@ -62,6 +62,11 @@ _CODE_TEXT_CAP = 12000
 # Slack rejects a section block whose text exceeds 3000 characters.
 _TEXT_CAP = 3000
 
+# Slack rejects an image block whose alt_text exceeds 2000 characters. Distinct
+# from the header's 150 -- one title feeds both and neither limit covers the
+# other.
+_ALT_TEXT_CAP = 2000
+
 
 # Slack treats `&`, `<` and `>` as control characters in every mrkdwn field:
 # `<...>` is how mentions, channel references and hyperlinks are encoded, and `&`
@@ -149,6 +154,71 @@ def _rich_text_preformatted_block(text: str) -> dict:
     }
 
 
+def _log_dropped_block(plugin_name: str, kind: str, why: str) -> None:
+    """Announce a block that was built and then dropped.
+
+    Slack rejects the whole message over a zero-length required string, so
+    dropping the block is right -- but it drops user-facing content, and the
+    links path already established that a silent drop is only ever diagnosed
+    as "a user asking where it went". Logged so the frequency is knowable
+    before anyone writes friendlier copy for it (#207).
+    """
+    logger.warning("Dropping %s block for '%s': %s", kind, plugin_name, why)
+
+
+def _append(blocks: list, block: dict | None) -> None:
+    """Append *block* unless the builder declined to produce one."""
+    if block is not None:
+        blocks.append(block)
+
+
+def _header_block(plugin_name: str, response: dict, title) -> dict | None:
+    """A `header`, or None when the title is absent or empty.
+
+    Truthiness rather than `"title" in response`: Slack rejects the whole
+    message over a zero-length `plain_text`, so a present-but-empty title has
+    to be dropped rather than rendered (#207).
+    """
+    if title:
+        return {"type": "header", "text": {"type": "plain_text", "text": title[:150]}}
+    if "title" in response:
+        _log_dropped_block(plugin_name, "title", "it is empty")
+    return None
+
+
+def _text_block(plugin_name: str, text: str) -> dict | None:
+    """A mrkdwn `section`, or None when the text escapes to empty.
+
+    The guard reads the ESCAPED body, not the raw input: the cap and the
+    partial-entity trim both run before the length is knowable, so a non-empty
+    input can still yield a zero-length field (#207).
+    """
+    body = _escaped_mrkdwn(text, _TEXT_CAP)
+    if body:
+        return {"type": "section", "text": {"type": "mrkdwn", "text": body}}
+    _log_dropped_block(plugin_name, "text", f"it escapes to empty from {len(text)} raw char(s)")
+    return None
+
+
+def _image_block(plugin_name: str, response: dict, title) -> dict | None:
+    """An `image`, or None when `image_url` is absent or empty.
+
+    `alt_text` uses `or` rather than a dict default, which cannot fire when the
+    key is present-but-empty, and is capped at 2000 rather than the header's
+    150 -- one title feeds both and neither limit covers the other. Three
+    zero-length-rejection sites live on this path (#207).
+    """
+    if response.get("image_url"):
+        return {
+            "type": "image",
+            "image_url": response["image_url"],
+            "alt_text": (title or plugin_name)[:_ALT_TEXT_CAP],
+        }
+    if "image_url" in response:
+        _log_dropped_block(plugin_name, "image", "its image_url is empty")
+    return None
+
+
 def format_response(plugin_name: str, response: dict) -> dict:
     """Translate a content plugin response dict into Slack Block Kit blocks.
 
@@ -177,14 +247,9 @@ def format_response(plugin_name: str, response: dict) -> dict:
 
     # Truthiness, not `"title" in response`: Slack rejects the whole message
     # over a zero-length `plain_text`, so a present-but-empty title has to be
-    # dropped rather than rendered (#207).
-    if response.get("title"):
-        blocks.append(
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "text": response["title"][:150]},
-            }
-        )
+    # dropped rather than rendered (#207). One local, three consumers.
+    title = response.get("title")
+    _append(blocks, _header_block(plugin_name, response, title))
 
     code_text = response.get("code_text")
     text = response.get("text")
@@ -200,11 +265,7 @@ def format_response(plugin_name: str, response: dict) -> dict:
         blocks.append(_rich_text_preformatted_block(code_text))
 
     if isinstance(text, str):
-        # Guard the ESCAPED body, not the raw input: the cap and the
-        # partial-entity trim both run before we know the length (#207).
-        body = _escaped_mrkdwn(text, _TEXT_CAP)
-        if body:
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": body}})
+        _append(blocks, _text_block(plugin_name, text))
 
     if response.get("links"):
         # Labels carry upstream data (Spotify album names, for one) and an
@@ -237,17 +298,7 @@ def format_response(plugin_name: str, response: dict) -> dict:
                 max(len(line) for line in link_lines),
             )
 
-    if "image_url" in response:
-        blocks.append(
-            {
-                "type": "image",
-                "image_url": response["image_url"],
-                # `or`, not a dict default: the default cannot fire when the
-                # key is present-but-empty, and `alt_text` is the third
-                # zero-length-rejection site on the empty-title path (#207).
-                "alt_text": response.get("title") or plugin_name,
-            }
-        )
+    _append(blocks, _image_block(plugin_name, response, title))
 
     blocks.append(
         {
