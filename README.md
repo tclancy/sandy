@@ -214,9 +214,22 @@ def handle(text: str, actor: str, progress=None) -> dict:
 
 > The loader globs every `*.py` in that directory. A file declaring **none** of
 > `name` / `commands` / `handle` is treated as a helper and skipped in silence —
-> that is how `base.py` stays quiet (#182). A file declaring *some* of them, or
-> subclassing `SandyPlugin` without also exposing the three at module level, is
-> a plugin with a bug and says so on stderr.
+> that is how `base.py` stays quiet (#182). A file declaring *some* of them is a
+> plugin with a bug and says so on stderr.
+>
+> **Class-based plugins are supported, but the file loader reads module scope.**
+> Subclassing `SandyPlugin` is not enough on its own — the loader appends the
+> *module*, so bridge the instance out:
+>
+> ```python
+> plugin = MyPlugin()
+> name = plugin.name
+> commands = plugin.commands
+> handle = plugin.handle
+> ```
+>
+> A subclass with no bridge warns and names the missing lines. (Entry-point
+> plugins do not need the bridge — they register the object directly.)
 
 **Response dict keys** (all optional):
 

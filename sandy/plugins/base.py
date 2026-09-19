@@ -21,6 +21,18 @@ class SandyPlugin(ABC):
     (async) to write a plugin. If only ``handle()`` is overridden, a default
     ``handle_async()`` wraps it in ``asyncio.to_thread`` automatically — no
     plugin migration needed.
+
+    **If the plugin is a file in the plugin directory, subclassing is not
+    enough.** That loader reads module scope and appends the *module*, so
+    bridge the instance out beneath the class::
+
+        plugin = MyPlugin()
+        name = plugin.name
+        commands = plugin.commands
+        handle = plugin.handle
+
+    A subclass without the bridge is skipped with a warning naming these lines
+    (#182). Entry-point plugins register the object directly and need no bridge.
     """
 
     @property

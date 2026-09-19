@@ -447,7 +447,7 @@ def test_a_registered_entry_point_declaring_nothing_still_warns(tmp_path, monkey
 
     Registering under `ENTRY_POINT_GROUP` is itself a declaration of intent, so
     a zero-surface entry point *is* broken and must say so. A file sitting in a
-    directory has made no such claim. Without this, `_declares_plugin_surface`
+    directory has made no such claim. Without this, `_declares_plugin_attrs`
     could be moved into `_validate_plugin` — a tidier-looking one-line change
     that silences a real defect.
     """
@@ -495,8 +495,16 @@ def test_a_class_based_plugin_file_still_warns(tmp_path, capsys):
 
     plugins = load_plugins(str(tmp_path))
 
+    err = capsys.readouterr().err
     assert plugins == []
-    assert "weather.py" in capsys.readouterr().err
+    assert "weather.py" in err
+    # The message has to be TRUE, not merely present. `_validate_plugin`'s
+    # "missing name, commands, handle" is false here — the author defined all
+    # three, as properties, exactly as `base.py` instructs. A diagnostic that
+    # misnames the fault is this whole arm's justification spent and wasted.
+    assert "missing name, commands, handle" not in err
+    assert "Weather subclasses SandyPlugin" in err
+    assert "plugin = Weather()" in err
 
 
 def test_an_unfinished_subclass_is_scaffolding_and_stays_silent(tmp_path, capsys):
@@ -524,6 +532,58 @@ def test_an_unfinished_subclass_is_scaffolding_and_stays_silent(tmp_path, capsys
 
     assert plugins == []
     assert capsys.readouterr().err == ""
+
+
+def test_a_helper_that_merely_imports_a_plugin_class_stays_silent(tmp_path, capsys):
+    """`vars()` cannot tell "defined here" from "imported for reuse" — `__module__` can.
+
+    A helper re-exporting a sibling's plugin class has made no claim of its
+    own, so it is scaffolding and belongs in the silent arm. Without
+    `_own_values`, the imported class is found in `vars()` and the helper is
+    reported as an unbridged plugin — a warning naming a class it does not own.
+
+    The sibling is written too, as a reachability control: if the import fails
+    the module never loads, `_own_plugin_class` is never reached, and the
+    silence below would prove nothing.
+    """
+    _write_plugin(
+        tmp_path,
+        "weather.py",
+        """
+        from sandy.plugins.base import SandyPlugin
+
+        class Weather(SandyPlugin):
+            @property
+            def name(self):
+                return "weather"
+
+            @property
+            def commands(self):
+                return ["weather"]
+
+            def handle(self, text, actor):
+                return "sunny"
+    """,
+    )
+    _write_plugin(
+        tmp_path,
+        "reuse.py",
+        """
+        import sys
+        sys.path.insert(0, __file__.rsplit("/", 1)[0])
+        from weather import Weather  # noqa: F401
+    """,
+    )
+
+    plugins = load_plugins(str(tmp_path))
+
+    err = capsys.readouterr().err
+    assert plugins == []
+    # Control: the sibling DID load and DID warn, so the loader reached both
+    # files. `reuse.py` is silent because it owns nothing, not because the
+    # directory went unread.
+    assert "weather.py" in err
+    assert "reuse.py" not in err
 
 
 def test_a_module_exposing_only_a_plugin_instance_still_warns(tmp_path, capsys):
@@ -563,5 +623,8 @@ def test_a_module_exposing_only_a_plugin_instance_still_warns(tmp_path, capsys):
 
     plugins = load_plugins(str(tmp_path))
 
+    err = capsys.readouterr().err
     assert plugins == []
-    assert "factory_built.py" in capsys.readouterr().err
+    assert "factory_built.py" in err
+    assert "missing name, commands, handle" not in err
+    assert "plugin = Weather()" in err

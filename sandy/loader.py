@@ -29,37 +29,76 @@ def _is_concrete_plugin(value) -> bool:
     )
 
 
-def _declares_plugin_surface(module) -> bool:
-    """True if *module* claims to be a Sandy plugin at all.
+def _own_values(module):
+    """Values *defined in* `module`, not merely imported into it.
 
-    Separates "this file was never meant to be a plugin" from "this plugin has
-    a bug", which `_validate_plugin` cannot do on its own: it prints the same
-    warning for `sandy/plugins/base.py` — shared scaffolding for plugin authors,
-    correct as written — as for a plugin whose author forgot `handle` (#182).
+    A helper that does `from .weather import WeatherPlugin` to reuse a plugin
+    class has made no claim of its own, and `vars()` cannot tell that apart
+    from defining one. Classes carry `__module__`; instances carry it on their
+    type.
+    """
+    for value in vars(module).values():
+        owner = value if isinstance(value, type) else type(value)
+        if getattr(owner, "__module__", None) == module.__name__:
+            yield value
 
-    A module carrying *none* of `REQUIRED_ATTRS` is not a broken plugin, it is
-    not a plugin. One that carries some but not all of them is claiming to be
-    one and getting it wrong, which is exactly what the warning is for.
+
+def _declares_plugin_attrs(module) -> bool:
+    """True if *module* names any of `REQUIRED_ATTRS` at module scope.
 
     `REQUIRED_ATTRS` is reused here to answer a different question than
     `_validate_plugin` asks it — "does this file *claim* to be a plugin" rather
     than "is this plugin complete". The two are deliberately the same list: a
     file is claiming exactly as much as it names.
 
-    **The class-based arm is not a nicety.** A file that follows `base.py`'s own
-    instruction — subclass `SandyPlugin`, override `handle` — has no module-level
-    surface at all, and the file loader appends the *module*, so such a file has
-    never actually worked. Without this arm it would go from a wrong warning to
-    no warning, which is worse: the author following the documented shape is
-    exactly the person who needs to be told.
-
-    Deliberately not used on the entry-point path: registering under
-    `ENTRY_POINT_GROUP` is itself a declaration of intent, so a zero-surface
-    entry point is broken and should say so.
+    A module carrying *none* of them is not a broken plugin, it is not a
+    plugin. One that carries some but not all is claiming to be one and getting
+    it wrong, which is exactly what the warning exists for (#182).
     """
-    if any(hasattr(module, attr) for attr in REQUIRED_ATTRS):
-        return True
-    return any(_is_concrete_plugin(value) for value in vars(module).values())
+    return any(hasattr(module, attr) for attr in REQUIRED_ATTRS)
+
+
+def _own_plugin_class(module):
+    """The first concrete `SandyPlugin` *module* defines, or None.
+
+    A file following `base.py`'s own instruction — subclass `SandyPlugin`,
+    override `handle` — has no module-level surface at all, and the file loader
+    appends the *module*, so such a file has never worked. Silencing it would
+    trade a wrong diagnostic for a missing one, on exactly the author who most
+    needs telling.
+
+    Abstract subclasses are excluded on purpose, and `SandyPlugin` itself is
+    the first of them: an ABC with unimplemented members is scaffolding for the
+    next author, which is the thing this module is trying to stop warning
+    about.
+
+    Deliberately not consulted on the entry-point path: registering under
+    `ENTRY_POINT_GROUP` is itself a declaration of intent, so a zero-surface
+    entry point *is* broken and should say so.
+    """
+    for value in _own_values(module):
+        if _is_concrete_plugin(value):
+            return value if isinstance(value, type) else type(value)
+    return None
+
+
+def _warn_missing_bridge(cls, label: str) -> None:
+    """Report a class-based plugin that never reached module scope.
+
+    `_validate_plugin`'s "missing name, commands, handle" is *false* here: the
+    author defined all three, as properties, exactly as `base.py` instructs.
+    The real defect is that the file loader reads module scope and nothing
+    bridged the instance out to it. A diagnostic that misnames the fault is the
+    justification for this arm spent and wasted.
+    """
+    print(
+        f"Warning: skipping {label}: {cls.__name__} subclasses SandyPlugin but "
+        f"{', '.join(REQUIRED_ATTRS)} are not at module scope — the file loader "
+        f"reads the module, so add the bridge: "
+        f"`plugin = {cls.__name__}()` then `name = plugin.name`, "
+        f"`commands = plugin.commands`, `handle = plugin.handle`",
+        file=sys.stderr,
+    )
 
 
 def _validate_plugin(module, label: str) -> bool:
@@ -106,9 +145,13 @@ def _load_file_plugins(plugin_dir: str, config: dict) -> list:
             print(f"Warning: failed to load {filename}: {e}", file=sys.stderr)
             continue
 
-        # Scaffolding and helpers living beside the plugins are skipped in
-        # silence; only a file that claims to be a plugin can be a broken one.
-        if not _declares_plugin_surface(module):
+        # Three-way, not two. A file claiming nothing is a helper and is
+        # skipped in silence; a file whose only claim is a class needs a
+        # different diagnostic than `_validate_plugin` can give it.
+        if not _declares_plugin_attrs(module):
+            orphan = _own_plugin_class(module)
+            if orphan is not None:
+                _warn_missing_bridge(orphan, filename)
             continue
 
         if not _validate_plugin(module, filename):
