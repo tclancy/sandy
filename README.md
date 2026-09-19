@@ -217,10 +217,18 @@ def handle(text: str, actor: str, progress=None) -> dict:
 | Key | Type | Effect |
 |-----|------|--------|
 | `title` | str | Printed as a header |
-| `text` | str | Plain text body |
+| `text` | str | Body. Plain text on the CLI; **mrkdwn** on Slack — see the note below |
 | `links` | list of `{label, url}` | Printed as labeled URLs |
 | `audio_url` | str | Downloaded and played via `afplay` (macOS) |
 | `pdf_url` | str | Downloaded and sent to the configured printer |
+
+`text` reaches Slack as a mrkdwn field, and the transport escapes only half of
+it. `&`, `<` and `>` are escaped for you, so a plugin cannot accidentally emit a
+mention or a hyperlink. `*`, `_` and backtick are **not** escaped — they are the
+formatting vocabulary `help`, `sports` and `printer_status` already write on
+purpose. A plugin interpolating untrusted text (an exception, an upstream API
+string) into `text` owns that half itself; put it in `code_text` if it must
+survive verbatim. See sandy#204.
 
 The `progress` parameter (optional) is a callable you can use to report status:
 

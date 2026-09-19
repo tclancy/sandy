@@ -1,6 +1,6 @@
 """Tests for Slack transport plugin."""
 
-from sandy.transports.slack import format_response, inbound_lag_seconds
+from sandy.transports.slack import escape_mrkdwn, format_response, inbound_lag_seconds
 
 
 def test_format_response_text_only():
@@ -155,11 +155,13 @@ def test_format_response_legacy_fenced_text_auto_promoted():
 
     This is the backward-compat path that fixes #122 even for plugins not yet updated.
     """
-    legacy = "```\nfoo bar\nbaz\n```"
+    legacy = "```\nfoo <bar>\nbaz\n```"
     result = format_response("legacy", {"title": "Old plugin", "text": legacy})
     blocks = result["blocks"]
     code_blocks = _rich_text_blocks(blocks)
-    assert code_blocks == ["foo bar\nbaz"]
+    # Promoted to rich_text_preformatted, which is literal — so NOT escaped,
+    # even though the same bytes arriving as an unpromoted `text` would be.
+    assert code_blocks == ["foo <bar>\nbaz"]
     # No raw mrkdwn section with literal backticks left behind.
     sections = [b for b in blocks if b.get("type") == "section"]
     assert not any("```" in b["text"]["text"] for b in sections)
@@ -230,3 +232,188 @@ def test_inbound_lag_seconds_negative_clamped_to_zero():
     """Clock skew (event ts ahead of now) clamps to 0, never negative."""
     event = {"ts": "1000.000000"}
     assert inbound_lag_seconds(event, now=999.0) == 0.0
+
+
+# --- mrkdwn control-character escaping (issue #204) ---
+#
+# Slack interprets `&`, `<` and `>` as control characters in every mrkdwn field.
+# `*`, `_` and backtick are deliberately NOT escaped: three plugins (help,
+# sports, printer_status) emit them on purpose, and Slack documents no escape
+# for them. See `escape_mrkdwn`'s docstring for the measurement behind that.
+
+
+def _section_text(result, needle):
+    """Return the first section block's mrkdwn text containing *needle*."""
+    return next(
+        b["text"]["text"]
+        for b in result["blocks"]
+        if b["type"] == "section" and needle in b["text"]["text"]
+    )
+
+
+def test_escape_mrkdwn_neutralises_a_user_mention():
+    """`<@U12345>` must not reach Slack as a real mention."""
+    assert escape_mrkdwn("no config for <@U12345>") == "no config for &lt;@U12345&gt;"
+
+
+def test_escape_mrkdwn_escapes_ampersand_before_angle_brackets():
+    """`<` becomes `&lt;`, never `&amp;lt;` — the `&` pass must run first."""
+    assert escape_mrkdwn("<") == "&lt;"
+    assert escape_mrkdwn(">") == "&gt;"
+
+
+def test_escape_mrkdwn_escapes_a_literal_ampersand():
+    assert escape_mrkdwn("Tom & Jerry") == "Tom &amp; Jerry"
+
+
+def test_escape_mrkdwn_leaves_deliberate_markup_alone():
+    """help/sports/printer_status emit `*bold*` and `code` on purpose."""
+    assert escape_mrkdwn("*Everton* (FT): `lpstat -p` _x_") == "*Everton* (FT): `lpstat -p` _x_"
+
+
+def test_format_response_escapes_control_chars_in_text():
+    """An exception string reaching `text` renders literally, not as a mention."""
+    result = format_response("dispatch", {"text": "failed: <@U12345> & <Foo object at 0x1>"})
+    text = _section_text(result, "failed:")
+    assert text == "failed: &lt;@U12345&gt; &amp; &lt;Foo object at 0x1&gt;"
+
+
+def test_format_response_preserves_deliberate_mrkdwn_in_text():
+    """Escaping must not regress the three plugins that format on purpose."""
+    result = format_response("sports", {"text": "*Today's Results:*\n*Everton* (FT): 2-1"})
+    text = _section_text(result, "Everton")
+    assert text == "*Today's Results:*\n*Everton* (FT): 2-1"
+
+
+def test_format_response_does_not_escape_code_text():
+    """rich_text_preformatted is literal — escaping there would show `&amp;`."""
+    result = format_response("test", {"code_text": "if a < b && c > d:"})
+    block = next(b for b in result["blocks"] if b["type"] == "rich_text")
+    assert block["elements"][0]["elements"][0]["text"] == "if a < b && c > d:"
+
+
+def test_format_response_escapes_link_labels():
+    """A `>` in an upstream label must not end the link sequence early.
+
+    `|` is deliberately not escaped: Slack splits on the *first* pipe, so a
+    later one is ordinary label text.
+    """
+    result = format_response(
+        "spotify",
+        {"links": [{"label": "A|B <redacted>", "url": "https://example.com/?a=1&b=2"}]},
+    )
+    text = _section_text(result, "example.com")
+    assert text == "<https://example.com/?a=1&b=2|A|B &lt;redacted&gt;>"
+
+
+def test_format_response_leaves_link_urls_alone():
+    """The URL half is not escaped — `&` there is a query separator, not markup.
+
+    Escaping it would rewrite every OAuth URL Sandy hands out (the Spotify
+    `music login` link carries `scope`, `state` and `redirect_uri`), and buys
+    nothing: `<` and `>` cannot legally appear unescaped in a URI anyway.
+    """
+    url = "https://accounts.spotify.com/authorize?scope=a&state=b&redirect_uri=c"
+    result = format_response("music_discovery", {"links": [{"label": "Log in", "url": url}]})
+    assert _section_text(result, "accounts.spotify") == f"<{url}|Log in>"
+
+
+def test_format_response_drops_whole_link_lines_over_the_cap():
+    """The links section is capped too — and by whole lines, not mid-sequence.
+
+    A section over 3000 characters gets the entire message rejected by Slack.
+    Cutting mid-`<url|label>` would instead leave a dangling `<`.
+    """
+    links = [{"label": "L" * 100, "url": "https://example.com/" + "u" * 100} for _ in range(40)]
+    text = _section_text(format_response("spotify", {"links": links}), "example.com")
+    assert len(text) <= 3000
+    assert text.endswith(">")
+    assert all(line.startswith("<") and line.endswith(">") for line in text.split("\n"))
+
+
+def test_format_response_truncates_after_escaping():
+    """The 3000-char Slack cap applies to the escaped payload, not the raw one."""
+    result = format_response("test", {"text": "&" * 2000})
+    text = _section_text(result, "&amp;")
+    assert len(text) <= 3000
+
+
+def test_format_response_never_emits_a_half_written_entity():
+    """Truncation that lands mid-entity must drop the fragment, not ship `&a`.
+
+    2998 filler chars plus one `&` escapes to 3003; the cut at 3000 lands two
+    characters into the `&amp;`. An entity-aligned payload cannot show this —
+    `&amp;` is 5 chars and 3000 divides by 5, so every straddle test has to be
+    built out of a deliberately unaligned prefix.
+    """
+    result = format_response("test", {"text": "x" * 2998 + "&"})
+    text = _section_text(result, "x")
+    assert text == "x" * 2998
+
+
+def test_dispatch_placeholder_syntax_is_escaped_end_to_end():
+    """The other half of #204's split, on the producers it actually changes.
+
+    Four plugins write `<placeholder>` into `text` — `dispatch` (twice),
+    `cast_to_tv` and `music_discovery`. None is a Slack control sequence, so
+    Slack renders them literally today; after this change they arrive as
+    entities and Slack decodes them back. This is the test that goes red if
+    anyone narrows the escape to "only real control sequences".
+    """
+    from sandy.plugins.dispatch import _SHIFT_HELP
+
+    text = _section_text(format_response("dispatch", {"text": _SHIFT_HELP}), "dispatch shift")
+    assert text.startswith("`dispatch shift &lt;kind&gt;` runs a Dispatch shift on the Mac.")
+
+
+def test_sports_bold_survives_the_transport_end_to_end():
+    """The decision in #204 is that three plugins own `*` — pin one of them.
+
+    A blanket escape of `text` passes every unit test above and still breaks
+    this: `sports` builds its whole layout out of mrkdwn bold.
+    """
+    from sandy.plugins.sports import _build_response
+
+    response = _build_response(
+        [{"team": "Everton", "game": "EVE vs LIV", "status": "FT", "score": "2-1"}],
+        [],
+    )
+    text = _section_text(format_response("sports", response), "Everton")
+    assert "*Everton* (FT): EVE vs LIV — 2-1" in text
+    # Every `*` is intact; the section header's literal `&` is entity-escaped,
+    # which Slack decodes back to `&` on render.
+    assert text.startswith("*Today's Results &amp; Live Scores:*\n")
+    assert text.count("*") == response["text"].count("*")
+
+
+def test_format_response_omits_the_links_block_when_nothing_fits():
+    """A single over-cap link must drop the block, not emit an empty one.
+
+    Slack's Block Kit rejects a `text` object of zero length outright, so
+    returning "" here would turn a risk of an over-length rejection into a
+    guaranteed one — strictly worse than the uncapped code it replaced.
+    """
+    result = format_response(
+        "spotify", {"text": "ok", "links": [{"label": "L" * 4000, "url": "https://example.com"}]}
+    )
+    # Reachability control: the `text` section must still be there, or the
+    # `all(...)` below would pass over an empty set and prove nothing.
+    assert any(b["type"] == "section" for b in result["blocks"])
+    assert not any("example.com" in b.get("text", {}).get("text", "") for b in result["blocks"])
+    assert all(b["text"]["text"] for b in result["blocks"] if b["type"] == "section"), (
+        "no section may carry empty text"
+    )
+
+
+def test_format_response_keeps_links_behind_an_oversized_one():
+    """One unrenderable link must not take the renderable ones with it.
+
+    `break` discarded everything after the first over-cap line; ordering is
+    upstream's (Spotify's release order), so which links survived was luck.
+    """
+    links = [
+        {"label": "L" * 4000, "url": "https://example.com/huge"},
+        {"label": "Reserve", "url": "https://example.com/small"},
+    ]
+    text = _section_text(format_response("spotify", {"links": links}), "Reserve")
+    assert text == "<https://example.com/small|Reserve>"

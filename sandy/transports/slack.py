@@ -59,6 +59,82 @@ _FENCED_RE = re.compile(r"(?s)\A```\n(.*)\n```\Z")
 # under Slack's overall block-payload limits and avoid an API-rejection failure mode.
 _CODE_TEXT_CAP = 12000
 
+# Slack rejects a section block whose text exceeds 3000 characters.
+_TEXT_CAP = 3000
+
+
+# Slack treats `&`, `<` and `>` as control characters in every mrkdwn field:
+# `<...>` is how mentions, channel references and hyperlinks are encoded, and `&`
+# opens an HTML entity. Those three are also the only characters Slack documents
+# an escape for — there is no documented escape for `*`, `_` or backtick.
+#
+# Order matters and is load-bearing: `&` must be replaced first, or the `&` that
+# `&lt;` introduces gets escaped a second time into `&amp;lt;`.
+_MRKDWN_CONTROL_ESCAPES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
+
+# A truncation that lands inside `&amp;` would ship `&am` to Slack, which renders
+# as literal `&am`. Every `&` in an escaped payload belongs to an entity, so a
+# trailing `&` followed only by letters is always a fragment and never content.
+_PARTIAL_ENTITY_RE = re.compile(r"&[a-z]*\Z")
+
+
+def escape_mrkdwn(text: str) -> str:
+    """Neutralise Slack's control characters in plugin-supplied *text*.
+
+    Escapes `&`, `<` and `>` and nothing else. `*`, `_` and backtick are left
+    alone deliberately: three plugins — ``help``, ``sports`` and
+    ``printer_status`` — emit `*bold*` and `` `code` `` in ``text`` on purpose,
+    so a blanket escape would be a visible regression for them, and Slack
+    publishes no escape for those characters anyway (#204).
+
+    The half this *does* fix is the half with a failure mode worse than
+    cosmetic: an exception or upstream API string containing `<@U12345>`
+    otherwise reaches Slack as a real mention.
+
+    Not idempotent, deliberately: text that already contains `&amp;` becomes
+    `&amp;amp;` and renders as the literal `&amp;`. No producer does that today
+    — every one of them interpolates raw API data — but a future plugin
+    scraping HTML would need to unescape before returning.
+    """
+    for char, entity in _MRKDWN_CONTROL_ESCAPES:
+        text = text.replace(char, entity)
+    return text
+
+
+def _escaped_mrkdwn(text: str, cap: int) -> str:
+    """Escape *text* for mrkdwn, then truncate to *cap* without splitting an entity.
+
+    Escaping first and capping second is the only safe order. Capping the raw
+    text first would let escaping push the payload back over Slack's hard limit
+    and get the whole message rejected.
+    """
+    return _PARTIAL_ENTITY_RE.sub("", escape_mrkdwn(text)[:cap])
+
+
+def _join_within_cap(lines: list[str], cap: int) -> str:
+    """Newline-join every whole line from *lines* that still fits in *cap*.
+
+    Whole lines rather than a character truncation: each line here is a
+    complete `<url|label>` sequence, and a cut inside one leaves a dangling
+    `<` that swallows the rest of the message.
+
+    Skips over a line that does not fit rather than stopping at it — the order
+    is upstream's (Spotify's release order), so stopping would make *which*
+    links survive a matter of where the long one happened to land.
+
+    Returns ``""`` when no line fits at all; the caller must then omit the
+    block rather than emit an empty one.
+    """
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        extra = len(line) + (1 if kept else 0)
+        if used + extra > cap:
+            continue
+        kept.append(line)
+        used += extra
+    return "\n".join(kept)
+
 
 def _rich_text_preformatted_block(text: str) -> dict:
     """Render *text* as a Slack rich_text_preformatted block (Slack's first-class code block)."""
@@ -87,6 +163,14 @@ def format_response(plugin_name: str, response: dict) -> dict:
     Legacy plugins that pre-wrap ``text`` in triple-backtick fences are
     auto-promoted to a ``rich_text_preformatted`` block so the fix lands
     before every plugin is updated.
+
+    **``text`` is a mrkdwn field, and only half of it is escaped for you.**
+    ``&``, ``<`` and ``>`` are escaped here (see :func:`escape_mrkdwn`), so a
+    plugin cannot accidentally emit a mention or a hyperlink. ``*``, ``_`` and
+    backtick are *not*: they are the formatting vocabulary ``help``, ``sports``
+    and ``printer_status`` already write on purpose, so a plugin interpolating
+    untrusted text into ``text`` owns that half itself — wrap it in
+    ``code_text`` if it must survive verbatim (#204).
     """
     logger.debug("Formatting response for plugin '%s': keys=%s", plugin_name, list(response.keys()))
     blocks = []
@@ -116,18 +200,40 @@ def format_response(plugin_name: str, response: dict) -> dict:
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": text[:3000]},
+                "text": {"type": "mrkdwn", "text": _escaped_mrkdwn(text, _TEXT_CAP)},
             }
         )
 
     if response.get("links"):
-        link_lines = [f"<{link['url']}|{link['label']}>" for link in response["links"]]
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "\n".join(link_lines)},
-            }
-        )
+        # Labels carry upstream data (Spotify album names, for one) and an
+        # unescaped `>` in one ends the link sequence early. The URL half is
+        # left alone on purpose: `&` there is a query separator, escaping it
+        # would rewrite every OAuth URL Sandy hands out, and `<`/`>` cannot
+        # legally appear unescaped in a URI to begin with.
+        link_lines = [
+            f"<{link['url']}|{escape_mrkdwn(link['label'])}>" for link in response["links"]
+        ]
+        # Empty when even the first line is over the cap on its own. Slack
+        # rejects a zero-length text object, so emitting the block anyway would
+        # turn a *risk* of an over-length rejection into a certain one.
+        link_text = _join_within_cap(link_lines, _TEXT_CAP)
+        if link_text:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": link_text},
+                }
+            )
+        else:
+            # Dropping user-facing content, and for `spotify` the links ARE
+            # the answer — say so somewhere, or the only symptom is a user
+            # asking where they went.
+            logger.warning(
+                "Dropping links block for '%s': no link line fits the %d-char cap (longest %d)",
+                plugin_name,
+                _TEXT_CAP,
+                max(len(line) for line in link_lines),
+            )
 
     if "image_url" in response:
         blocks.append(

@@ -147,7 +147,8 @@ Each plugin is a `.py` file in `sandy/plugins/` that exposes:
 - `name: str` — human-readable name (e.g. `"spotify"`)
 - `commands: list[str]` — phrases to match (case-insensitive substring)
 - `handle(text: str, actor: str) -> dict` — returns response dict with:
-  - `text` (required): plain text response
+  - `text` (required): response body. Plain text on the CLI; **mrkdwn** on Slack —
+    the transport escapes `&`, `<`, `>` but deliberately not `*`, `_`, backtick (#204)
   - `title` (optional): heading
   - `links` (optional): list of `{"label": str, "url": str}`
   - `image_url` (optional): image URL
