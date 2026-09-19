@@ -112,21 +112,25 @@ def _escaped_mrkdwn(text: str, cap: int) -> str:
 
 
 def _join_within_cap(lines: list[str], cap: int) -> str:
-    """Newline-join as many whole *lines* as fit in *cap* characters.
+    """Newline-join every whole line from *lines* that still fits in *cap*.
 
     Whole lines rather than a character truncation: each line here is a
     complete `<url|label>` sequence, and a cut inside one leaves a dangling
     `<` that swallows the rest of the message.
 
-    Returns ``""`` when even the first line exceeds *cap* on its own; the
-    caller must then omit the block rather than emit an empty one.
+    Skips over a line that does not fit rather than stopping at it — the order
+    is upstream's (Spotify's release order), so stopping would make *which*
+    links survive a matter of where the long one happened to land.
+
+    Returns ``""`` when no line fits at all; the caller must then omit the
+    block rather than emit an empty one.
     """
     kept: list[str] = []
     used = 0
     for line in lines:
         extra = len(line) + (1 if kept else 0)
         if used + extra > cap:
-            break
+            continue
         kept.append(line)
         used += extra
     return "\n".join(kept)
@@ -219,6 +223,16 @@ def format_response(plugin_name: str, response: dict) -> dict:
                     "type": "section",
                     "text": {"type": "mrkdwn", "text": link_text},
                 }
+            )
+        else:
+            # Dropping user-facing content, and for `spotify` the links ARE
+            # the answer — say so somewhere, or the only symptom is a user
+            # asking where they went.
+            logger.warning(
+                "Dropping links block for '%s': no link line fits the %d-char cap (longest %d)",
+                plugin_name,
+                _TEXT_CAP,
+                max(len(line) for line in link_lines),
             )
 
     if "image_url" in response:

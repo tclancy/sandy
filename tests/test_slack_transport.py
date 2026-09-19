@@ -396,7 +396,24 @@ def test_format_response_omits_the_links_block_when_nothing_fits():
     result = format_response(
         "spotify", {"text": "ok", "links": [{"label": "L" * 4000, "url": "https://example.com"}]}
     )
+    # Reachability control: the `text` section must still be there, or the
+    # `all(...)` below would pass over an empty set and prove nothing.
+    assert any(b["type"] == "section" for b in result["blocks"])
     assert not any("example.com" in b.get("text", {}).get("text", "") for b in result["blocks"])
     assert all(b["text"]["text"] for b in result["blocks"] if b["type"] == "section"), (
         "no section may carry empty text"
     )
+
+
+def test_format_response_keeps_links_behind_an_oversized_one():
+    """One unrenderable link must not take the renderable ones with it.
+
+    `break` discarded everything after the first over-cap line; ordering is
+    upstream's (Spotify's release order), so which links survived was luck.
+    """
+    links = [
+        {"label": "L" * 4000, "url": "https://example.com/huge"},
+        {"label": "Reserve", "url": "https://example.com/small"},
+    ]
+    text = _section_text(format_response("spotify", {"links": links}), "Reserve")
+    assert text == "<https://example.com/small|Reserve>"
