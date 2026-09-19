@@ -19,29 +19,11 @@ import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-import sandy.config as config_module
 from sandy.cli import main
 from sandy.daemon import Daemon
 from sandy.pipeline import NO_MATCH_MESSAGE
 
 UNMATCHED = "something no plugin has ever heard of"
-
-
-@pytest.fixture(autouse=True)
-def _isolate_config(monkeypatch):
-    """Keep the real ~/.config/sandy/sandy.toml out of these tests.
-
-    Both helpers drive the production pipeline, which calls ``load_config()``
-    and then ``apply_env()`` -- so without this the developer's actual config is
-    read and its UPPERCASE keys (Slack and Spotify tokens among them) are
-    injected into ``os.environ`` for every test that runs afterwards. It can
-    also turn the run red for an unrelated reason: an ``[actors]`` section that
-    does not resolve "tom" makes the pipeline return an access-denied *result*,
-    so the no-match branch never runs at all.
-    """
-    monkeypatch.setattr(config_module, "_SEARCH_PATHS", [])
 
 
 _ECHO_PLUGIN = {
