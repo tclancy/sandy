@@ -175,7 +175,10 @@ def format_response(plugin_name: str, response: dict) -> dict:
     logger.debug("Formatting response for plugin '%s': keys=%s", plugin_name, list(response.keys()))
     blocks = []
 
-    if "title" in response:
+    # Truthiness, not `"title" in response`: Slack rejects the whole message
+    # over a zero-length `plain_text`, so a present-but-empty title has to be
+    # dropped rather than rendered (#207).
+    if response.get("title"):
         blocks.append(
             {
                 "type": "header",
@@ -197,12 +200,11 @@ def format_response(plugin_name: str, response: dict) -> dict:
         blocks.append(_rich_text_preformatted_block(code_text))
 
     if isinstance(text, str):
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": _escaped_mrkdwn(text, _TEXT_CAP)},
-            }
-        )
+        # Guard the ESCAPED body, not the raw input: the cap and the
+        # partial-entity trim both run before we know the length (#207).
+        body = _escaped_mrkdwn(text, _TEXT_CAP)
+        if body:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": body}})
 
     if response.get("links"):
         # Labels carry upstream data (Spotify album names, for one) and an
@@ -240,7 +242,10 @@ def format_response(plugin_name: str, response: dict) -> dict:
             {
                 "type": "image",
                 "image_url": response["image_url"],
-                "alt_text": response.get("title", plugin_name),
+                # `or`, not a dict default: the default cannot fire when the
+                # key is present-but-empty, and `alt_text` is the third
+                # zero-length-rejection site on the empty-title path (#207).
+                "alt_text": response.get("title") or plugin_name,
             }
         )
 

@@ -417,3 +417,58 @@ def test_format_response_keeps_links_behind_an_oversized_one():
     ]
     text = _section_text(format_response("spotify", {"links": links}), "Reserve")
     assert text == "<https://example.com/small|Reserve>"
+
+
+# --- #207: a zero-length Block Kit text object is a guaranteed rejection ------
+#
+# Slack requires every `text` object, `plain_text` header and image `alt_text`
+# to carry at least one character; a zero-length one rejects the WHOLE message,
+# so emitting the block is strictly worse than omitting it. PR #206 established
+# this on the links section. These are the remaining producers.
+
+
+def test_empty_text_emits_no_section_block():
+    """An empty `text` is dropped rather than shipped as a zero-length object."""
+    blocks = format_response("p", {"text": ""})["blocks"]
+    assert not [b for b in blocks if b["type"] == "section"]
+
+
+def test_empty_title_emits_no_header_block():
+    """An empty `title` is dropped rather than shipped as a zero-length header."""
+    blocks = format_response("p", {"title": ""})["blocks"]
+    assert not [b for b in blocks if b["type"] == "header"]
+
+
+def test_empty_title_does_not_become_an_empty_image_alt_text():
+    """`alt_text` falls back to the plugin name when `title` is present-but-empty.
+
+    `response.get("title", plugin_name)` returns `""` for an empty-string title
+    because the KEY exists, so the default never fires. Dropping the header
+    block alone leaves this second zero-length string live.
+    """
+    blocks = format_response("p", {"title": "", "image_url": "https://x/y.png"})["blocks"]
+    image = next(b for b in blocks if b["type"] == "image")
+    assert image["alt_text"] == "p"
+
+
+def test_text_that_escapes_to_empty_emits_no_section_block():
+    """The guard reads the ESCAPED body, not the raw input."""
+    blocks = format_response("p", {"text": ""})["blocks"]
+    assert all(b.get("text", {}).get("text") != "" for b in blocks)
+
+
+def test_an_entirely_empty_response_still_renders_a_valid_message():
+    """Dropping every block must not produce an empty `blocks` array.
+
+    Slack rejects `blocks: []` too, so the guards above are only safe because
+    the `via *plugin*` context block is unconditional. Pin that.
+    """
+    blocks = format_response("p", {"title": "", "text": ""})["blocks"]
+    assert blocks == [{"type": "context", "elements": [{"type": "mrkdwn", "text": "via *p*"}]}]
+
+
+def test_non_empty_title_and_text_still_render():
+    """Control: the guards must not swallow real content."""
+    blocks = format_response("p", {"title": "T", "text": "body"})["blocks"]
+    assert next(b for b in blocks if b["type"] == "header")["text"]["text"] == "T"
+    assert next(b for b in blocks if b["type"] == "section")["text"]["text"] == "body"
