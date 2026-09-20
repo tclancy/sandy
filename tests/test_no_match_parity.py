@@ -19,6 +19,8 @@ import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from sandy.cli import main
 from sandy.daemon import Daemon
 from sandy.pipeline import NO_MATCH_MESSAGE
