@@ -5,7 +5,7 @@ description = "CLI tool that routes text commands to plugins"
 requires-python = ">=3.13"
 dependencies = [
     "requests>=2.34.2",
-    "aiohttp>=3.14.3",
+    "aiohttp>=3.14.5",
     "slack-bolt>=1.30.0",
     "spotipy>=2.26.0",
     "pylast>=7.2.0",
@@ -63,7 +63,7 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff>=0.16.10",
+    "ruff>=0.17.0",
     "pre-commit>=4.6.2",
     "pytest-asyncio>=1.4.0",
 ]
